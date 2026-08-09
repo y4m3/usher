@@ -1,0 +1,8 @@
+# Build artifacts
+/desktop/target/
+/tui/target/
+/desktop/gen/
+
+# Local agent workspace (not part of the published project)
+/.handoff/
+/.claude/

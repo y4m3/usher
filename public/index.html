@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>usher</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20256%20256%22%3E%3Crect%20width%3D%22256%22%20height%3D%22256%22%20fill%3D%22%23111C18%22%2F%3E%3Cg%20transform%3D%22rotate%28-8%20128%20128%29%22%3E%3Crect%20x%3D%2240%22%20y%3D%2276%22%20width%3D%22176%22%20height%3D%22104%22%20rx%3D%2216%22%20ry%3D%2216%22%20fill%3D%22%234FB87C%22%2F%3E%3Ccircle%20cx%3D%22164%22%20cy%3D%2276%22%20r%3D%2213%22%20fill%3D%22%23111C18%22%2F%3E%3Ccircle%20cx%3D%22164%22%20cy%3D%22180%22%20r%3D%2213%22%20fill%3D%22%23111C18%22%2F%3E%3Cline%20x1%3D%22164%22%20y1%3D%2276%22%20x2%3D%22164%22%20y2%3D%22180%22%20stroke%3D%22%236FE89B%22%20stroke-width%3D%224%22%20stroke-dasharray%3D%227%2C7%22%20stroke-linecap%3D%22round%22%2F%3E%3Crect%20x%3D%2260%22%20y%3D%22108%22%20width%3D%2246%22%20height%3D%226%22%20rx%3D%223%22%20fill%3D%22%23111C18%22%2F%3E%3Crect%20x%3D%2260%22%20y%3D%22126%22%20width%3D%2234%22%20height%3D%226%22%20rx%3D%223%22%20fill%3D%22%23111C18%22%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E">
+<style>
+  :root {
+    --bg: #111C18;
+    --bg-alt: #15221E;
+    --bg2: #1A2823;
+    --border: #273932;
+    --border-hi: #354941;
+    --fg: #B8C7BC;
+    --fg-bright: #D4E0D6;
+    --muted: #7E9488;
+    --selection: #2B4038;
+    --green: #4FB87C;
+    --neon: #6FE89B;
+    --neon-hover: #8CF2B2;
+    --on-accent: #06120C;
+    --cyan: #4FAFA6;
+    --yellow: #D3AA64;
+    --red: #CA6860;
+    --blue: #539EC0;
+    --purple: #9076AF;
+    font-family: -apple-system, Segoe UI, sans-serif;
+  }
+  body { margin: 0; background: var(--bg); color: var(--fg); }
+  h1 { font-size: 18px; padding: 12px 16px; margin: 0; border-bottom: 1px solid var(--border); background: var(--bg-alt); color: var(--neon); }
+  #new-btn { float: right; background: var(--green); color: var(--on-accent); border: none; border-radius: 4px; padding: 4px 10px; font-size: 13px; cursor: pointer; }
+  #new-btn:hover { background: var(--neon-hover); }
+  .tabs { float: right; margin-right: 8px; }
+  .tab { background: var(--bg2); border: 1px solid var(--border); color: var(--fg); padding: 4px 10px; font-size: 13px; cursor: pointer; }
+  .tab:first-child { border-radius: 4px 0 0 4px; }
+  .tab:last-child { border-radius: 0 4px 4px 0; border-left: none; }
+  .tab.active { background: var(--green); color: var(--on-accent); border-color: var(--green); }
+  .toolbar { display: flex; gap: 8px; padding: 8px 16px; background: var(--bg-alt); border-bottom: 1px solid var(--border); }
+  .toolbar input, .toolbar select { background: var(--bg2); border: 1px solid var(--border); color: var(--fg); border-radius: 4px; padding: 4px 8px; font-family: inherit; font-size: 13px; }
+  .toolbar input { flex: 1; max-width: 300px; }
+  .toolbar input:focus, .toolbar select:focus { outline: none; border-color: var(--border-hi); }
+  .board { display: flex; gap: 12px; padding: 16px; align-items: flex-start; }
+  .column { flex: 1; background: var(--bg-alt); border: 1px solid var(--border); border-radius: 6px; padding: 8px; min-height: 60vh; }
+  .column h2 { font-size: 13px; text-transform: uppercase; margin: 4px 8px 8px; color: var(--muted); display: flex; align-items: center; justify-content: space-between; }
+  .col-toggle { background: var(--bg2); border: 1px solid var(--border); color: var(--muted); border-radius: 8px; padding: 0 6px; font-size: 10px; text-transform: none; cursor: pointer; }
+  .col-toggle:hover { color: var(--fg); border-color: var(--border-hi); }
+  .card { background: var(--bg2); border: 1px solid var(--border); border-radius: 4px; padding: 8px 10px; margin: 0 0 8px; cursor: grab; }
+  .card:hover { border-color: var(--border-hi); }
+  .card.dragging { opacity: .4; }
+  .card .id { font-size: 11px; color: var(--muted); }
+  .card .title { font-size: 14px; margin: 2px 0; color: var(--fg-bright); }
+  .card .due { font-size: 11px; color: var(--red); }
+  .card .tags { margin-top: 4px; }
+  .tag-chip { display: inline-block; font-size: 10px; color: var(--muted); margin-right: 4px; }
+  .prio { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 8px; color: var(--on-accent); }
+  .prio-urgent { background: var(--red); }
+  .prio-high { background: var(--yellow); }
+  .prio-normal { background: var(--blue); }
+  .prio-low { background: var(--muted); }
+  .column.dragover { outline: 2px dashed var(--green); }
+  .overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.6); }
+  .overlay .panel { background: var(--bg2); border: 1px solid var(--border); max-width: 640px; margin: 5vh auto; padding: 16px; border-radius: 6px; max-height: 85vh; overflow: auto; color: var(--fg); }
+  .overlay pre { white-space: pre-wrap; font-size: 13px; background: var(--bg-alt); border: 1px solid var(--border); padding: 8px; border-radius: 4px; color: var(--fg); }
+  .overlay label { display: block; font-size: 11px; color: var(--muted); text-transform: uppercase; margin: 8px 0 2px; }
+  .overlay input, .overlay select, .overlay textarea {
+    width: 100%; box-sizing: border-box; background: var(--bg-alt); border: 1px solid var(--border);
+    color: var(--fg); border-radius: 4px; font-family: inherit; font-size: 14px; padding: 5px 7px;
+  }
+  .overlay textarea { height: 60px; }
+  .overlay input:focus, .overlay select:focus, .overlay textarea:focus { outline: none; border-color: var(--border-hi); }
+  .overlay button { margin-top: 10px; background: var(--green); color: var(--on-accent); border: none; border-radius: 4px; padding: 6px 12px; cursor: pointer; }
+  .overlay button:hover { background: var(--neon-hover); }
+  .overlay button + button { margin-left: 6px; }
+  .overlay .close { float: right; cursor: pointer; color: var(--muted); }
+  .overlay .close:hover { color: var(--neon); }
+  .overlay hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
+  #calendar { display: none; padding: 16px; }
+  .cal-header { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+  .cal-header button { background: var(--bg2); border: 1px solid var(--border); color: var(--fg); border-radius: 4px; padding: 2px 10px; cursor: pointer; }
+  .cal-header span { font-weight: bold; color: var(--fg-bright); }
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+  .cal-weekday { font-size: 11px; text-transform: uppercase; color: var(--muted); text-align: center; padding: 4px; }
+  .cal-cell { background: var(--bg-alt); border: 1px solid var(--border); border-radius: 4px; min-height: 80px; padding: 4px; }
+  .cal-cell.today { border-color: var(--green); }
+  .cal-day { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+  .cal-card { background: var(--bg2); border-left: 3px solid var(--blue); border-radius: 2px; padding: 2px 4px; margin-bottom: 2px; font-size: 11px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cal-card.prio-urgent { border-left-color: var(--red); }
+  .cal-card.prio-high { border-left-color: var(--yellow); }
+  .cal-card.prio-normal { border-left-color: var(--blue); }
+  .cal-card.prio-low { border-left-color: var(--muted); }
+  .cal-card.overdue { border-left-color: var(--red); color: var(--red); }
+  ::selection { background: var(--selection); }
+</style>
+</head>
+<body>
+<h1>usher
+  <button id="new-btn" onclick="openNewModal()">+ New</button>
+  <span class="tabs">
+    <button id="tab-board" class="tab active" onclick="switchView('board')">Board</button>
+    <button id="tab-calendar" class="tab" onclick="switchView('calendar')">Calendar</button>
+  </span>
+</h1>
+<div class="toolbar">
+  <input id="search" placeholder="Search id or title... ( / )">
+  <select id="project-filter"></select>
+  <select id="tag-filter"></select>
+</div>
+<div class="board" id="board"></div>
+<div id="calendar"></div>
+
+<div class="overlay" id="modal">
+  <div class="panel">
+    <span class="close" onclick="closeModal()">&times;</span>
+    <label>Title</label>
+    <input id="modal-title">
+    <label>Priority</label>
+    <select id="modal-priority">
+      <option value="urgent">urgent</option>
+      <option value="high">high</option>
+      <option value="normal">normal</option>
+      <option value="low">low</option>
+    </select>
+    <label>Due</label>
+    <input id="modal-due" type="date">
+    <label>Project</label>
+    <select id="modal-project"></select>
+    <label>Tags (comma-separated)</label>
+    <input id="modal-tags">
+    <label>Summary</label>
+    <textarea id="modal-summary"></textarea>
+    <label>Notes</label>
+    <textarea id="modal-notes"></textarea>
+    <button onclick="saveTicket()">Save</button>
+    <hr>
+    <label>Log (read-only)</label>
+    <pre id="modal-body"></pre>
+    <textarea id="modal-note" placeholder="Log note..."></textarea>
+    <button onclick="submitLog()">Append to Log</button>
+  </div>
+</div>
+
+<div class="overlay" id="new-modal">
+  <div class="panel">
+    <span class="close" onclick="closeNewModal()">&times;</span>
+    <label>Title</label>
+    <input id="new-title" placeholder="Ticket title">
+    <label>Priority</label>
+    <select id="new-priority">
+      <option value="urgent">urgent</option>
+      <option value="high">high</option>
+      <option value="normal" selected>normal</option>
+      <option value="low">low</option>
+    </select>
+    <label>Due</label>
+    <input id="new-due" type="date">
+    <label>Project</label>
+    <select id="new-project"></select>
+    <button onclick="submitNew()">Create</button>
+  </div>
+</div>
+
+<script>
+const COLUMNS = ["open", "doing", "review", "done"];
+let currentId = null;
+let currentTicket = null;
+let currentSections = null;
+let PROJECTS = [];
+let allTickets = [];
+let currentView = "board";
+let calMonth = new Date();
+calMonth.setDate(1);
+const filterInitialized = { project: false, tag: false };
+const PRIORITY_RANK = { urgent: 0, high: 1, normal: 2, low: 3 };
+
+// The vault dates are local dates, like todayDate() in server.js. Do not use
+// toISOString(), because it gives the UTC date.
+const localISODate = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+function populateProjectSelect(selectId, selected) {
+  const sel = document.getElementById(selectId);
+  sel.innerHTML = '<option value="">(none)</option>' + PROJECTS.map(p => `<option value="${p}">${p}</option>`).join("");
+  sel.value = selected || "";
+}
+
+// Read the saved value from localStorage one time. After that, a re-render must
+// not replace the current choice of the user.
+function populateFilter(kind) {
+  const sel = document.getElementById(`${kind}-filter`);
+  const keep = filterInitialized[kind] ? sel.value : (localStorage.getItem(`filter.${kind}`) || "");
+  const options = kind === "project"
+    ? PROJECTS.map(p => `<option value="${p}">${p}</option>`).join("") + '<option value="__none__">(no project)</option>'
+    : [...new Set(allTickets.flatMap(t => t.tags || []))].sort().map(tag => `<option value="${tag}">#${tag}</option>`).join("");
+  sel.innerHTML = `<option value="">all ${kind}s</option>` + options;
+  sel.value = keep;
+  filterInitialized[kind] = true;
+}
+
+function matchesFilters(t) {
+  const q = document.getElementById("search").value.trim().toLowerCase();
+  if (q && !(t.id.toLowerCase().includes(q) || t.title.toLowerCase().includes(q))) return false;
+  const pf = document.getElementById("project-filter").value;
+  if (pf === "__none__" && t.project) return false;
+  if (pf && pf !== "__none__" && t.project !== pf) return false;
+  const tf = document.getElementById("tag-filter").value;
+  if (tf && !(t.tags || []).includes(tf)) return false;
+  return true;
+}
+
+function ticketSort(a, b) {
+  if (PRIORITY_RANK[a.priority] !== PRIORITY_RANK[b.priority]) return PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority];
+  const ad = a.due || "9999-99-99", bd = b.due || "9999-99-99";
+  if (ad !== bd) return ad < bd ? -1 : 1;
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+
+function isModalOpen() {
+  return document.getElementById("modal").style.display === "block" || document.getElementById("new-modal").style.display === "block";
+}
+
+// Get new data from the server. The page calls this function on load, after a
+// write, on window focus, and on the 30-second timer.
+async function load() {
+  PROJECTS = await fetch("/api/projects").then(r => r.json());
+  allTickets = await fetch("/api/tickets").then(r => r.json());
+  render();
+}
+
+// Render again from allTickets in memory, with no request to the server. A
+// change of the search, filter, sort, view or month uses this function. These
+// changes need no new data.
+function render() {
+  populateFilter("project");
+  populateFilter("tag");
+  const filtered = allTickets.filter(matchesFilters);
+  if (currentView === "calendar") return renderCalendar(filtered);
+  renderBoard(filtered);
+}
+
+function renderBoard(tickets) {
+  const board = document.getElementById("board");
+  board.innerHTML = "";
+  const doneFilter = localStorage.getItem("doneFilter") || "7d";
+  for (const status of COLUMNS) {
+    let colTickets = tickets.filter(t => t.status === status);
+    if (status === "done" && doneFilter === "7d") {
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - 7);
+      const cutoffStr = localISODate(cutoff);
+      colTickets = colTickets.filter(t => t.closed && t.closed >= cutoffStr);
+    }
+    colTickets.sort(ticketSort);
+
+    const col = document.createElement("div");
+    col.className = "column";
+    col.dataset.status = status;
+    const toggle = status === "done" ? `<button class="col-toggle" onclick="toggleDoneFilter()">${doneFilter}</button>` : "";
+    col.innerHTML = `<h2><span>${status} (${colTickets.length})</span>${toggle}</h2>`;
+    col.addEventListener("dragover", e => { e.preventDefault(); col.classList.add("dragover"); });
+    col.addEventListener("dragleave", () => col.classList.remove("dragover"));
+    col.addEventListener("drop", onDrop);
+    for (const t of colTickets) {
+      col.appendChild(renderCard(t));
+    }
+    board.appendChild(col);
+  }
+}
+
+function toggleDoneFilter() {
+  const cur = localStorage.getItem("doneFilter") || "7d";
+  localStorage.setItem("doneFilter", cur === "7d" ? "all" : "7d");
+  render();
+}
+
+function renderCard(t) {
+  const card = document.createElement("div");
+  card.className = "card";
+  card.draggable = true;
+  card.dataset.id = t.id;
+  card.innerHTML = `
+    <div class="id">${t.id} <span class="prio prio-${t.priority}">${t.priority}</span></div>
+    <div class="title">${escapeHtml(t.title)}</div>
+    ${t.due ? `<div class="due">due ${t.due}</div>` : ""}
+    ${(t.tags || []).length ? `<div class="tags">${t.tags.map(tag => `<span class="tag-chip">#${escapeHtml(tag)}</span>`).join("")}</div>` : ""}
+  `;
+  card.addEventListener("dragstart", e => {
+    card.classList.add("dragging");
+    e.dataTransfer.setData("text/plain", t.id);
+  });
+  card.addEventListener("dragend", () => card.classList.remove("dragging"));
+  card.addEventListener("click", () => openModal(t));
+  return card;
+}
+
+async function onDrop(e) {
+  e.preventDefault();
+  e.currentTarget.classList.remove("dragover");
+  const id = e.dataTransfer.getData("text/plain");
+  const status = e.currentTarget.dataset.status;
+  const res = await fetch(`/api/tickets/${id}/status`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
+  if (!res.ok) alert("Update failed: " + (await res.json()).error);
+  load();
+}
+
+async function openModal(t) {
+  currentId = t.id;
+  currentTicket = t;
+  document.getElementById("modal-title").value = t.title;
+  document.getElementById("modal-priority").value = t.priority;
+  document.getElementById("modal-due").value = t.due || "";
+  populateProjectSelect("modal-project", t.project);
+  document.getElementById("modal-tags").value = (t.tags || []).join(", ");
+  const [text, sections] = await Promise.all([
+    fetch(`/api/tickets/${t.id}`).then(r => r.text()),
+    fetch(`/api/tickets/${t.id}/sections`).then(r => r.json()),
+  ]);
+  currentSections = sections;
+  document.getElementById("modal-summary").value = sections.summary;
+  document.getElementById("modal-notes").value = sections.notes;
+  document.getElementById("modal-body").textContent = text;
+  document.getElementById("modal-note").value = "";
+  document.getElementById("modal").style.display = "block";
+}
+
+function closeModal() {
+  document.getElementById("modal").style.display = "none";
+  currentId = null;
+  currentTicket = null;
+  currentSections = null;
+}
+
+// saveTicket uses this function to know what to send. tryCloseModal uses it to
+// know if a discard is safe. A Log note with text is also an edit.
+function computeChanges() {
+  const fields = {};
+  const title = document.getElementById("modal-title").value.trim();
+  const priority = document.getElementById("modal-priority").value;
+  const due = document.getElementById("modal-due").value;
+  const project = document.getElementById("modal-project").value;
+  if (title !== currentTicket.title) fields.title = title;
+  if (priority !== currentTicket.priority) fields.priority = priority;
+  if (due !== (currentTicket.due || "")) fields.due = due;
+  if (project !== (currentTicket.project || "")) fields.project = project;
+  const tags = document.getElementById("modal-tags").value.split(",").map(s => s.trim()).filter(Boolean);
+  if (JSON.stringify(tags) !== JSON.stringify(currentTicket.tags || [])) fields.tags = tags;
+
+  const sections = {};
+  const summary = document.getElementById("modal-summary").value;
+  const notes = document.getElementById("modal-notes").value;
+  if (summary !== currentSections.summary) sections.summary = summary;
+  if (notes !== currentSections.notes) sections.notes = notes;
+
+  const note = document.getElementById("modal-note").value.trim();
+  const hasEdits = Object.keys(fields).length > 0 || Object.keys(sections).length > 0 || note !== "";
+  return { fields, sections, hasEdits };
+}
+
+// Close on ESC or on a click outside the modal. Do not discard an edit that the
+// user did not save.
+function tryCloseModal() {
+  if (computeChanges().hasEdits) return;
+  closeModal();
+}
+
+async function saveTicket() {
+  const { fields, sections } = computeChanges();
+  if (Object.keys(fields).length) {
+    const r = await fetch(`/api/tickets/${currentId}/fields`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(fields),
+    });
+    if (!r.ok) { alert("Save failed: " + (await r.json()).error); return; }
+  }
+  if (Object.keys(sections).length) {
+    const r = await fetch(`/api/tickets/${currentId}/sections`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(sections),
+    });
+    if (!r.ok) { alert("Save failed: " + (await r.json()).error); return; }
+  }
+  closeModal();
+  load();
+}
+
+async function submitLog() {
+  const text = document.getElementById("modal-note").value.trim();
+  if (!text) return;
+  const res = await fetch(`/api/tickets/${currentId}/log`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+  if (!res.ok) { alert("Log failed: " + (await res.json()).error); return; }
+  closeModal();
+  load();
+}
+
+function openNewModal() {
+  document.getElementById("new-title").value = "";
+  document.getElementById("new-priority").value = "normal";
+  document.getElementById("new-due").value = "";
+  populateProjectSelect("new-project", "");
+  document.getElementById("new-modal").style.display = "block";
+}
+
+function closeNewModal() {
+  document.getElementById("new-modal").style.display = "none";
+}
+
+// Close on ESC or on a click outside the modal. An empty title has no content to
+// keep.
+function tryCloseNewModal() {
+  if (document.getElementById("new-title").value.trim() !== "") return;
+  closeNewModal();
+}
+
+async function submitNew() {
+  const title = document.getElementById("new-title").value.trim();
+  if (!title) return;
+  const priority = document.getElementById("new-priority").value;
+  const due = document.getElementById("new-due").value;
+  const project = document.getElementById("new-project").value;
+  const res = await fetch("/api/tickets", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title, priority, due, project }),
+  });
+  if (!res.ok) { alert("Create failed: " + (await res.json()).error); return; }
+  closeNewModal();
+  load();
+}
+
+function switchView(view) {
+  currentView = view;
+  document.getElementById("tab-board").classList.toggle("active", view === "board");
+  document.getElementById("tab-calendar").classList.toggle("active", view === "calendar");
+  document.getElementById("board").style.display = view === "board" ? "flex" : "none";
+  document.getElementById("calendar").style.display = view === "calendar" ? "block" : "none";
+  render();
+}
+
+function changeMonth(delta) {
+  calMonth.setMonth(calMonth.getMonth() + delta);
+  render();
+}
+
+function renderCalendar(tickets) {
+  const year = calMonth.getFullYear();
+  const month = calMonth.getMonth();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const startOffset = (new Date(year, month, 1).getDay() + 6) % 7; // Monday is 0
+  const todayStr = localISODate(new Date());
+
+  const byDate = {};
+  for (const t of tickets) {
+    if (!t.due || t.status === "archived") continue;
+    (byDate[t.due] ||= []).push(t);
+  }
+
+  const cal = document.getElementById("calendar");
+  cal.innerHTML = `
+    <div class="cal-header">
+      <button onclick="changeMonth(-1)">&lt;</button>
+      <span>${year}-${String(month + 1).padStart(2, "0")}</span>
+      <button onclick="changeMonth(1)">&gt;</button>
+    </div>
+    <div class="cal-grid" id="cal-grid"></div>
+  `;
+  const grid = document.getElementById("cal-grid");
+  for (const wd of ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]) {
+    const h = document.createElement("div");
+    h.className = "cal-weekday";
+    h.textContent = wd;
+    grid.appendChild(h);
+  }
+  for (let i = 0; i < startOffset; i++) grid.appendChild(document.createElement("div"));
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    const cell = document.createElement("div");
+    cell.className = "cal-cell" + (dateStr === todayStr ? " today" : "");
+    cell.innerHTML = `<div class="cal-day">${d}</div>`;
+    for (const t of byDate[dateStr] || []) {
+      const overdue = dateStr < todayStr && t.status !== "done";
+      const card = document.createElement("div");
+      card.className = `cal-card prio-${t.priority}` + (overdue ? " overdue" : "");
+      card.title = t.title;
+      card.textContent = `${t.id} ${t.title}`;
+      card.addEventListener("click", () => openModal(t));
+      cell.appendChild(card);
+    }
+    grid.appendChild(cell);
+  }
+}
+
+document.getElementById("search").addEventListener("input", render);
+document.getElementById("project-filter").addEventListener("change", () => {
+  localStorage.setItem("filter.project", document.getElementById("project-filter").value);
+  render();
+});
+document.getElementById("tag-filter").addEventListener("change", () => {
+  localStorage.setItem("filter.tag", document.getElementById("tag-filter").value);
+  render();
+});
+
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") {
+    if (isModalOpen()) {
+      if (document.getElementById("modal").style.display === "block") tryCloseModal();
+      if (document.getElementById("new-modal").style.display === "block") tryCloseNewModal();
+      return;
+    }
+    const search = document.getElementById("search");
+    search.value = "";
+    search.blur();
+    render();
+    return;
+  }
+  const typing = ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName);
+  if (isModalOpen() || typing) return;
+  if (e.key === "/") { e.preventDefault(); document.getElementById("search").focus(); }
+  if (e.key === "n") { openNewModal(); }
+});
+for (const [overlayId, tryCloseFn] of [["modal", tryCloseModal], ["new-modal", tryCloseNewModal]]) {
+  document.getElementById(overlayId).addEventListener("click", e => {
+    if (e.target === e.currentTarget) tryCloseFn();
+  });
+}
+
+// Keep the board current, but do not replace an edit in progress.
+window.addEventListener("focus", () => { if (!isModalOpen()) load(); });
+setInterval(() => { if (!isModalOpen()) load(); }, 30000);
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+load();
+</script>
+</body>
+</html>
