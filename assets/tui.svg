@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 470" font-family="ui-monospace, 'Cascadia Code', Consolas, monospace" font-size="13" role="img" aria-label="usher TUI screenshot mock">
+  <!-- Terminal window -->
+  <rect width="800" height="470" rx="12" fill="#15221E"/>
+  <circle cx="24" cy="22" r="6" fill="#CA6860"/>
+  <circle cx="44" cy="22" r="6" fill="#D3AA64"/>
+  <circle cx="64" cy="22" r="6" fill="#4FB87C"/>
+  <text x="400" y="27" text-anchor="middle" fill="#7E9488" font-size="12">usher</text>
+  <rect x="10" y="42" width="780" height="418" rx="6" fill="#111C18"/>
+
+  <!-- Columns -->
+  <g>
+    <rect x="22" y="56" width="180" height="360" rx="4" fill="#15221E" stroke="#4FB87C"/>
+    <text x="34" y="76" font-weight="bold" fill="#6FE89B">open</text>
+    <text x="78" y="76" fill="#7E9488">2</text>
+    <rect x="30" y="90" width="164" height="46" rx="3" fill="#2B4038"/>
+    <text x="38" y="108" font-weight="bold" fill="#CA6860">T-0004</text>
+    <text x="96" y="108" fill="#B8C7BC">Verify GUI</text>
+    <text x="38" y="126" fill="#7E9488">due 2026-08-12  #main</text>
+    <rect x="30" y="146" width="164" height="46" rx="3" fill="#1A2823"/>
+    <text x="38" y="164" font-weight="bold" fill="#539EC0">T-0002</text>
+    <text x="96" y="164" fill="#B8C7BC">Unpin Templ…</text>
+    <text x="38" y="182" fill="#7E9488">#maintenance</text>
+  </g>
+  <g>
+    <rect x="214" y="56" width="180" height="360" rx="4" fill="#15221E" stroke="#273932"/>
+    <text x="226" y="76" font-weight="bold" fill="#B8C7BC">doing</text>
+    <text x="278" y="76" fill="#7E9488">1</text>
+    <rect x="222" y="90" width="164" height="46" rx="3" fill="#1A2823"/>
+    <text x="230" y="108" font-weight="bold" fill="#D3AA64">T-0001</text>
+    <text x="288" y="108" fill="#B8C7BC">Bootstrap…</text>
+    <text x="230" y="126" fill="#7E9488">vault-bootstrap</text>
+  </g>
+  <g>
+    <rect x="406" y="56" width="180" height="360" rx="4" fill="#15221E" stroke="#273932"/>
+    <text x="418" y="76" font-weight="bold" fill="#B8C7BC">review</text>
+    <text x="478" y="76" fill="#7E9488">0</text>
+  </g>
+  <g>
+    <rect x="598" y="56" width="180" height="360" rx="4" fill="#15221E" stroke="#273932"/>
+    <text x="610" y="76" font-weight="bold" fill="#B8C7BC">done</text>
+    <text x="654" y="76" fill="#7E9488">3</text>
+    <text x="670" y="76" fill="#4FB87C">7d</text>
+    <rect x="606" y="90" width="164" height="46" rx="3" fill="#1A2823"/>
+    <text x="614" y="108" font-weight="bold" fill="#539EC0">T-0003</text>
+    <text x="672" y="108" fill="#B8C7BC">Fix the…</text>
+    <text x="614" y="126" fill="#7E9488">vault-bootstrap</text>
+    <rect x="606" y="146" width="164" height="46" rx="3" fill="#1A2823"/>
+    <text x="614" y="164" font-weight="bold" fill="#539EC0">T-0005</text>
+    <text x="672" y="164" fill="#B8C7BC">Polish…</text>
+    <text x="614" y="182" fill="#7E9488">#launch</text>
+    <rect x="606" y="202" width="164" height="46" rx="3" fill="#1A2823"/>
+    <text x="614" y="220" font-weight="bold" fill="#539EC0">T-0006</text>
+    <text x="672" y="220" fill="#B8C7BC">Ship…</text>
+    <text x="614" y="238" fill="#7E9488">#launch</text>
+  </g>
+
+  <!-- Footer -->
+  <text x="22" y="446" fill="#7E9488" font-size="12">h/l j/k move  n new  e edit  s status  m note  / search  p proj  t tag  . done  enter open  r  q</text>
+</svg>

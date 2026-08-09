@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 470" font-family="ui-monospace, 'Cascadia Code', Consolas, monospace" role="img" aria-label="usher architecture">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#7E9488"/>
+    </marker>
+  </defs>
+  <rect width="760" height="470" rx="14" fill="#111C18"/>
+
+  <!-- Front ends -->
+  <g>
+    <rect x="40" y="34" width="200" height="72" rx="8" fill="#1A2823" stroke="#273932"/>
+    <text x="140" y="64" text-anchor="middle" font-size="16" font-weight="bold" fill="#6FE89B">Web</text>
+    <text x="140" y="88" text-anchor="middle" font-size="12" fill="#B8C7BC">browser, kanban + calendar</text>
+
+    <rect x="280" y="34" width="200" height="72" rx="8" fill="#1A2823" stroke="#273932"/>
+    <text x="380" y="64" text-anchor="middle" font-size="16" font-weight="bold" fill="#6FE89B">Desktop</text>
+    <text x="380" y="88" text-anchor="middle" font-size="12" fill="#B8C7BC">Tauri shell, Windows</text>
+
+    <rect x="520" y="34" width="200" height="72" rx="8" fill="#1A2823" stroke="#273932"/>
+    <text x="620" y="64" text-anchor="middle" font-size="16" font-weight="bold" fill="#6FE89B">TUI</text>
+    <text x="620" y="88" text-anchor="middle" font-size="12" fill="#B8C7BC">terminal, Windows + WSL</text>
+  </g>
+
+  <!-- Write engines -->
+  <g>
+    <rect x="120" y="180" width="280" height="76" rx="8" fill="#15221E" stroke="#354941"/>
+    <text x="260" y="210" text-anchor="middle" font-size="15" font-weight="bold" fill="#4FB87C">server.js</text>
+    <text x="260" y="234" text-anchor="middle" font-size="12" fill="#B8C7BC">HTTP API, Node, zero dependencies</text>
+
+    <rect x="470" y="180" width="250" height="76" rx="8" fill="#15221E" stroke="#354941"/>
+    <text x="595" y="210" text-anchor="middle" font-size="15" font-weight="bold" fill="#4FB87C">vault.rs</text>
+    <text x="595" y="234" text-anchor="middle" font-size="12" fill="#B8C7BC">Rust port of the same rules</text>
+  </g>
+
+  <!-- Vault -->
+  <rect x="150" y="360" width="460" height="76" rx="8" fill="#1A2823" stroke="#4FB87C"/>
+  <text x="380" y="390" text-anchor="middle" font-size="15" font-weight="bold" fill="#6FE89B">Obsidian Ticket Vault</text>
+  <text x="380" y="414" text-anchor="middle" font-size="12" fill="#B8C7BC">tickets/*.md — Markdown + YAML frontmatter, single source of truth</text>
+
+  <!-- Arrows -->
+  <line x1="140" y1="106" x2="200" y2="176" stroke="#7E9488" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="380" y1="106" x2="320" y2="176" stroke="#7E9488" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="620" y1="106" x2="600" y2="176" stroke="#7E9488" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="260" y1="256" x2="310" y2="356" stroke="#7E9488" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="595" y1="256" x2="480" y2="356" stroke="#7E9488" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Write-safety note -->
+  <g>
+    <rect x="40" y="288" width="330" height="40" rx="6" fill="#111C18" stroke="#273932" stroke-dasharray="4,4"/>
+    <text x="205" y="313" text-anchor="middle" font-size="11.5" fill="#7E9488">each write: lint → write → read back → compare bytes</text>
+  </g>
+</svg>
