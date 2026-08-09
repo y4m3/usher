@@ -1,0 +1,23 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "usher",
+  "version": "0.1.0",
+  "identifier": "dev.y4m3.usher",
+  "build": {
+    "frontendDist": "../public"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "usher",
+        "url": "http://localhost:3000",
+        "width": 1000,
+        "height": 700
+      }
+    ]
+  },
+  "bundle": {
+    "active": false
+  }
+}
