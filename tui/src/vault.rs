@@ -214,7 +214,11 @@ pub fn get_section(text: &str, header: &str) -> Result<String, String> {
     Ok(lines[start..end].join("\n").trim().to_string())
 }
 
-/// The `<vault>/projects/*.md` note names, sorted.
+/// The project note names, sorted. A project note is either
+/// `<vault>/projects/<name>.md`, or `<vault>/projects/<name>/<name>.md` when the
+/// vault uses one folder per project (an Obsidian folder note). Only the top
+/// level is scanned, so the theme folders that may live inside a project folder
+/// do not end up in the list.
 pub fn list_projects(vault: &Path) -> Vec<String> {
     let mut names = Vec::new();
     let Ok(entries) = fs::read_dir(vault.join("projects")) else {
@@ -222,7 +226,13 @@ pub fn list_projects(vault: &Path) -> Vec<String> {
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().is_some_and(|e| e == "md")
+        if path.is_dir() {
+            if let Some(name) = path.file_name().and_then(|s| s.to_str())
+                && path.join(format!("{name}.md")).is_file()
+            {
+                names.push(name.to_string());
+            }
+        } else if path.extension().is_some_and(|e| e == "md")
             && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
         {
             names.push(stem.to_string());
@@ -232,8 +242,10 @@ pub fn list_projects(vault: &Path) -> Vec<String> {
     names
 }
 
+/// Checked against the list, not against a built path, so that a name with a
+/// separator or ".." in it can never resolve to a file outside `projects/`.
 pub fn project_exists(vault: &Path, name: &str) -> bool {
-    vault.join("projects").join(format!("{name}.md")).is_file()
+    list_projects(vault).iter().any(|n| n == name)
 }
 
 /// The rule of system/scripts/next_ticket_id.js: one more than the highest
@@ -1130,6 +1142,22 @@ mod tests {
         let after = fs::read_to_string(&path).unwrap();
         let (_, came) = changed_region(&before, &after);
         assert_eq!(came, ["project: \"[[vault-bootstrap]]\""]);
+    }
+
+    #[test]
+    fn list_projects_covers_flat_and_folder_note_projects() {
+        // The fixture vault, read directly: it has a flat project
+        // (vault-bootstrap.md), a folder-note project
+        // (folder-note-demo/folder-note-demo.md), a theme note one level below
+        // that folder, and a project folder with no matching note.
+        let vault = source();
+
+        assert_eq!(list_projects(&vault), ["folder-note-demo", "vault-bootstrap"]);
+        assert!(project_exists(&vault, "folder-note-demo"));
+        assert!(project_exists(&vault, "vault-bootstrap"));
+        assert!(!project_exists(&vault, "theme-note"), "one level below a project folder");
+        assert!(!project_exists(&vault, "no-note-folder"), "folder with no matching note");
+        assert!(!project_exists(&vault, "../../../etc/passwd"));
     }
 
     #[test]
