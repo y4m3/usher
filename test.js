@@ -224,6 +224,27 @@ async function runTests(fakeVault, checkVault) {
     assert(checkVault(fakeVault).length === 0, "POST /log: vault still lints clean");
   }
 
+  // A file with no terminating newline gets one, the same as the TUI's
+  // append_log_line does. Both engines must leave the same bytes behind, or a
+  // vault edited from one front end and then the other keeps flipping.
+  for (const [id, eol] of [["T-0001", "\n"], ["T-0900", "\r\n"]]) {
+    const file = ticketFile(fakeVault, id);
+    const stripped = fs.readFileSync(file, "utf8").replace(/\r?\n$/, "");
+    fs.writeFileSync(file, stripped, "utf8");
+    const res = await fetch(BASE + `/api/tickets/${id}/log`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: `no final newline ${id}` }),
+    });
+    assert(res.ok, `POST /log (${id}, no final newline): request succeeds`);
+    const after = fs.readFileSync(file, "utf8");
+    assert(after.endsWith(eol), `POST /log (${id}, no final newline): the file ends with its own EOL`);
+    assert(after.includes(`— no final newline ${id}`), `POST /log (${id}, no final newline): the line is there`);
+    if (eol === "\r\n") assert(!/(?<!\r)\n/.test(after), `POST /log (${id}): no bare LF introduced`);
+    else assert(!after.includes("\r"), `POST /log (${id}): no stray CR introduced`);
+    assert(checkVault(fakeVault).length === 0, `POST /log (${id}, no final newline): vault still lints clean`);
+  }
+
   // Create: the id is max+1. The file name, the branch and the frontmatter match
   // the template.
   {

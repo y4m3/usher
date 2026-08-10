@@ -211,7 +211,12 @@ function appendLog(text, line) {
   const trailingWS = section.slice(trimmed.length);
   const eol = detectEOL(text);
   const newSection = trimmed + eol + line + trailingWS;
-  return text.slice(0, start) + newSection + text.slice(end);
+  const out = text.slice(0, start) + newSection + text.slice(end);
+  // Give a file that does not end in a newline one, the same as the TUI's
+  // append_log_line does. The TUI needs the terminator because it rebuilds the
+  // file with join("\n"); skipping it here would leave the two engines writing
+  // different bytes for the same append.
+  return out.endsWith("\n") ? out : out + eol;
 }
 
 // Read the content of a section, without the empty lines around it. A write puts

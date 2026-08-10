@@ -105,7 +105,7 @@ pub fn change_status(path: &Path, new_status: &str, note: Option<&str>) -> Resul
         return Err(format!("unknown status \"{new_status}\""));
     }
     let original = read(path)?;
-    let eol = detect_eol(&original);
+    let cr = eol_cr(&original);
     let mut lines = split_lines(&original);
     let end = frontmatter_end(&lines)?;
 
@@ -123,9 +123,9 @@ pub fn change_status(path: &Path, new_status: &str, note: Option<&str>) -> Resul
         // archived keeps the date its work finished.
         fm_set(&mut lines[1..end], "closed", "")?;
     }
-    append_log_line(&mut lines, &transition_note(new_status, note))?;
+    append_log_line(&mut lines, &transition_note(new_status, note), cr)?;
 
-    write_verified(path, Some(&original), lines.join(eol))
+    write_verified(path, Some(&original), lines.join("\n"))
 }
 
 /// Add a free-text note to the `## Log` section. Change nothing else.
@@ -135,12 +135,12 @@ pub fn append_note(path: &Path, note: &str) -> Result<(), String> {
         return Err("empty note".to_string());
     }
     let original = read(path)?;
-    let eol = detect_eol(&original);
+    let cr = eol_cr(&original);
     let mut lines = split_lines(&original);
     frontmatter_end(&lines)?;
 
-    append_log_line(&mut lines, note)?;
-    write_verified(path, Some(&original), lines.join(eol))
+    append_log_line(&mut lines, note, cr)?;
+    write_verified(path, Some(&original), lines.join("\n"))
 }
 
 /// Set one frontmatter field. Validate and format it like the `/fields`
@@ -177,13 +177,12 @@ pub fn set_field(vault: &Path, path: &Path, field: &str, value: &str) -> Result<
         _ => return Err(format!("field \"{field}\" is not editable")),
     };
     let original = read(path)?;
-    let eol = detect_eol(&original);
     let mut lines = split_lines(&original);
     let end = frontmatter_end(&lines)?;
 
     fm_set(&mut lines[1..end], field, &formatted)?;
 
-    write_verified(path, Some(&original), lines.join(eol))
+    write_verified(path, Some(&original), lines.join("\n"))
 }
 
 /// Replace the full `tags:` block. The block is the key line and its
@@ -199,7 +198,6 @@ pub fn set_tags(path: &Path, tags: &[String]) -> Result<(), String> {
         }
     }
     let original = read(path)?;
-    let eol = detect_eol(&original);
     let mut lines = split_lines(&original);
     let end = frontmatter_end(&lines)?;
 
@@ -214,16 +212,19 @@ pub fn set_tags(path: &Path, tags: &[String]) -> Result<(), String> {
         .take_while(|l| l.starts_with(char::is_whitespace) && l.trim_start().starts_with("- "))
         .count();
 
+    // The whole block is rebuilt. Give it the ending of the `tags:` line it
+    // replaces, so a pure LF or pure CRLF file keeps its bytes.
+    let cr = line_cr(&lines[at]);
     let block: Vec<String> = if unique.is_empty() {
-        vec!["tags: []".to_string()]
+        vec![format!("tags: []{cr}")]
     } else {
-        std::iter::once("tags:".to_string())
-            .chain(unique.iter().map(|t| format!("  - {t}")))
+        std::iter::once(format!("tags:{cr}"))
+            .chain(unique.iter().map(|t| format!("  - {t}{cr}")))
             .collect()
     };
     lines.splice(at..at + 1 + items, block);
 
-    write_verified(path, Some(&original), lines.join(eol))
+    write_verified(path, Some(&original), lines.join("\n"))
 }
 
 /// The body of a section, without the empty lines around it. This is the part
@@ -232,7 +233,13 @@ pub fn set_tags(path: &Path, tags: &[String]) -> Result<(), String> {
 pub fn get_section(text: &str, header: &str) -> Result<String, String> {
     let lines = split_lines(text);
     let (start, end) = section_bounds(&lines, header)?;
-    Ok(lines[start..end].join("\n").trim().to_string())
+    Ok(lines[start..end]
+        .iter()
+        .map(|l| l.trim_end_matches('\r'))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string())
 }
 
 /// The project note names, sorted. A project note is either
@@ -416,6 +423,7 @@ pub fn lint_content(file_name: &str, text: &str) -> Vec<String> {
     let raw = |key: &str| fm_get(fm, key);
     let get = |key: &str| raw(key).map(|v| unquote(&v));
 
+
     let id = get("id").unwrap_or_default();
     if !is_ticket_id(&id) {
         errors.push(match raw("id") {
@@ -470,6 +478,7 @@ pub fn lint_content(file_name: &str, text: &str) -> Vec<String> {
     if status.as_deref() == Some("done") && get("closed").unwrap_or_default().is_empty() {
         errors.push("status done but closed is empty".to_string());
     }
+
     let branch = get("branch").unwrap_or_default();
     if !branch.is_empty() && !branch.starts_with(&id) {
         errors.push(format!("branch \"{branch}\" does not start with {id}"));
@@ -562,38 +571,53 @@ fn transition_note(status: &str, note: Option<&str>) -> String {
     }
 }
 
-/// Read the line ending from the bytes of the file. Do not use the line ending
-/// of the platform.
-fn detect_eol(text: &str) -> &'static str {
-    if text.contains("\r\n") { "\r\n" } else { "\n" }
+/// What to put at the end of a line that this module *adds*, where there is no
+/// old line to take an ending from: the style of the file as a whole, read from
+/// its bytes rather than taken from the platform. A line that already exists
+/// keeps whatever ending it has (see `split_lines` and `line_cr`).
+fn eol_cr(text: &str) -> &'static str {
+    if text.contains("\r\n") { "\r" } else { "" }
 }
 
-/// Split on `'\n'`, then drop one trailing `'\r'` from each line. A file that
-/// uses only one line-ending style round-trips: `split_lines(text).join(eol)`
-/// (with `eol` from `detect_eol`) gives back the same bytes, so a line that no
-/// edit touches stays the same. A file with mixed endings does not
-/// round-trip; a write normalizes it to the single ending `detect_eol`
-/// returns for that file.
+/// The `'\r'` a line already carries, or `""`. A line that is rebuilt in place
+/// keeps the ending it had. Thus an edit changes the text of that line and
+/// nothing else, also in a file with mixed endings.
+fn line_cr(line: &str) -> &'static str {
+    if line.ends_with('\r') { "\r" } else { "" }
+}
+
+/// Split on `'\n'` only. The `'\r'` of a CRLF ending stays on the line, so
+/// `split_lines(text).join("\n")` gives back the same bytes for any file, one
+/// with mixed endings included. Thus a line that no edit touches keeps its own
+/// ending. Every reader below therefore has to tolerate a trailing `'\r'`.
 fn split_lines(text: &str) -> Vec<String> {
-    text.split('\n').map(|l| l.strip_suffix('\r').unwrap_or(l).to_string()).collect()
+    text.split('\n').map(str::to_string).collect()
 }
 
-/// Trailing run a fence line may carry. Spaces and tabs only, to match the
-/// `[ \t]*` in server.js and check_vault.js: `trim_end` would also accept a
-/// no-break space and other Unicode whitespace, and then a file ending
-/// `---\u{a0}` would read as valid here and as `missing frontmatter` there.
-/// `split_lines` has already taken the '\r' off.
-const FENCE_PAD: [char; 2] = [' ', '\t'];
+/// The *closing* fence line without the run it may trail: the `'\r'` that
+/// `split_lines` now leaves on the line, and then spaces and tabs. Spaces and
+/// tabs only, to match the `[ \t]*` in server.js and check_vault.js --
+/// `trim_end` would also take a no-break space and the rest of Unicode
+/// whitespace, and then a file ending `---\u{a0}` would read as valid here and
+/// as `missing frontmatter` there. The '\r' comes off first because it sits
+/// after the padding, exactly where the `[ \t]*\r?\n` in those two regexes
+/// puts it.
+fn fence(line: &str) -> &str {
+    line.trim_end_matches('\r').trim_end_matches([' ', '\t'])
+}
 
 fn frontmatter_end(lines: &[String]) -> Result<usize, String> {
-    if lines.first().map(|l| l.trim_end_matches(FENCE_PAD)) != Some("---") {
+    // The opening fence takes no padding at all: both regexes start `^---\r?\n`
+    // and give the `[ \t]*` to the closing fence only. A file that opens with
+    // `--- ` has no frontmatter for either front end, so it must have none here.
+    if lines.first().map(|l| l.trim_end_matches('\r')) != Some("---") {
         return Err("missing frontmatter".to_string());
     }
     lines
         .iter()
         .enumerate()
         .skip(1)
-        .find(|(_, l)| l.trim_end_matches(FENCE_PAD) == "---")
+        .find(|(_, l)| fence(l) == "---")
         .map(|(i, _)| i)
         .ok_or_else(|| "unterminated frontmatter".to_string())
 }
@@ -637,11 +661,14 @@ fn fm_set(fm: &mut [String], key: &str, value: &str) -> Result<(), String> {
         .iter_mut()
         .find(|l| parse_kv(l).is_some_and(|(k, _)| k == key))
         .ok_or_else(|| format!("no `{key}:` line in the frontmatter"))?;
+    // This builds the whole line again, ending included. Take the ending of
+    // the line that is replaced, not of the file.
+    let cr = line_cr(line);
     // The vault writes an empty value as "key: ": colon, space, nothing.
     *line = if value.is_empty() {
-        format!("{key}: ")
+        format!("{key}: {cr}")
     } else {
-        format!("{key}: {value}")
+        format!("{key}: {value}{cr}")
     };
     Ok(())
 }
@@ -650,9 +677,11 @@ fn fm_set(fm: &mut [String], key: &str, value: &str) -> Result<(), String> {
 /// header line. It stops at the next `## ` heading or at the end of the file.
 fn section_bounds(lines: &[String], header: &str) -> Result<(usize, usize), String> {
     let heading = format!("## {header}");
+    // The '\r' only, not trim_end: server.js matches `^## <header>\r?\n`, so a
+    // heading with a space after it is no heading there and must be none here.
     let start = 1 + lines
         .iter()
-        .position(|l| *l == heading)
+        .position(|l| l.trim_end_matches('\r') == heading)
         .ok_or_else(|| format!("missing ## {header} section"))?;
     let end = lines[start..]
         .iter()
@@ -661,7 +690,21 @@ fn section_bounds(lines: &[String], header: &str) -> Result<(usize, usize), Stri
     Ok((start, end))
 }
 
-fn append_log_line(lines: &mut Vec<String>, text: &str) -> Result<(), String> {
+fn append_log_line(lines: &mut Vec<String>, text: &str, cr: &str) -> Result<(), String> {
+    // In this representation a line's trailing '\r' belongs to the separator
+    // that follows it, and `join("\n")` supplies the '\n' half. A file that
+    // does not end in a newline therefore has a last line with no separator at
+    // all, and appending after it would build one separator out of the old
+    // line's (missing) '\r' and the new '\n' — a bare LF — while the added
+    // line's own '\r' would end up at EOF as a lone CR. Give the file its
+    // terminating newline first, so every separator is of one kind. This is
+    // the only place that adds lines to a file, so it is the only place that
+    // needs it; the read-only and rewrite-in-place paths must not touch it.
+    if lines.last().is_some_and(|l| !l.is_empty()) {
+        let last = lines.len() - 1;
+        lines[last].push_str(cr);
+        lines.push(String::new());
+    }
     let (start, end) = section_bounds(lines, "Log")?;
     // Insert after the last line with text in the section. Thus the empty line
     // at the end stays. The separator before the next heading also stays.
@@ -669,7 +712,7 @@ fn append_log_line(lines: &mut Vec<String>, text: &str) -> Result<(), String> {
     while at > start && lines[at - 1].trim().is_empty() {
         at -= 1;
     }
-    lines.insert(at, format!("- {} \u{2014} {text}", now_stamp()));
+    lines.insert(at, format!("- {} \u{2014} {text}{cr}", now_stamp()));
     Ok(())
 }
 
@@ -841,6 +884,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_section_heading_takes_no_padding_either() {
+        // The body runs from the line after the heading to the end of the file:
+        // "" , "- entry", and the empty last element the final newline leaves.
+        let plain = split_lines("---\nid: T-0001\n---\n\n## Log\n\n- entry\n");
+        assert_eq!(section_bounds(&plain, "Log"), Ok((5, 8)));
+
+        let crlf = split_lines("---\r\nid: T-0001\r\n---\r\n\r\n## Log\r\n\r\n- entry\r\n");
+        assert_eq!(section_bounds(&crlf, "Log"), Ok((5, 8)), "the '\\r' still comes off");
+
+        let padded = split_lines("---\nid: T-0001\n---\n\n## Log \n\n- entry\n");
+        assert!(section_bounds(&padded, "Log").is_err(), "a trailing space is not a heading");
+    }
+
+    #[test]
     fn a_fence_takes_spaces_and_tabs_after_the_dashes_but_no_other_blank() {
         // server.js and check_vault.js allow `[ \t]*` there and nothing else.
         // Reading a wider set here would make a file that the web front end
@@ -853,6 +910,23 @@ mod tests {
 
         let opening_nbsp = split_lines("---\u{a0}\nid: T-0001\n---\n\n## Summary\n");
         assert!(frontmatter_end(&opening_nbsp).is_err(), "nor open it");
+
+        let opening_padded = split_lines("--- \nid: T-0001\n---\n\n## Summary\n");
+        assert!(frontmatter_end(&opening_padded).is_err(), "a space must not open the fence");
+
+        let opening_tab = split_lines("---\t\r\nid: T-0001\r\n---\r\n\r\n## Summary\r\n");
+        assert!(frontmatter_end(&opening_tab).is_err(), "nor a tab, in a CRLF file either");
+
+        // split_lines keeps the '\r' on the line now, so the fence has to look
+        // past it -- and past padding written before it, as CRLF files do.
+        let crlf = split_lines("---\r\nid: T-0001\r\n---\r\n\r\n## Summary\r\n");
+        assert_eq!(frontmatter_end(&crlf), Ok(2), "CRLF fence");
+
+        let crlf_padded = split_lines("---\r\nid: T-0001\r\n--- \t\r\n\r\n## Summary\r\n");
+        assert_eq!(frontmatter_end(&crlf_padded), Ok(2), "CRLF fence with padding");
+
+        let crlf_nbsp = split_lines("---\r\nid: T-0001\r\n---\u{a0}\r\n\r\n## Summary\r\n");
+        assert!(frontmatter_end(&crlf_nbsp).is_err(), "CRLF does not widen the set");
     }
 
     /// Read-only source of the fixture vault, checked into the repo. The tests
@@ -1105,12 +1179,15 @@ mod tests {
     }
 
     #[test]
-    fn split_lines_round_trips_pure_eol_files() {
+    fn split_lines_round_trips_every_file() {
         let lf = sample();
-        assert_eq!(split_lines(&lf).join(detect_eol(&lf)), lf, "pure LF must round-trip");
+        assert_eq!(split_lines(&lf).join("\n"), lf, "pure LF must round-trip");
 
         let crlf = lf.replace('\n', "\r\n");
-        assert_eq!(split_lines(&crlf).join(detect_eol(&crlf)), crlf, "pure CRLF must round-trip");
+        assert_eq!(split_lines(&crlf).join("\n"), crlf, "pure CRLF must round-trip");
+
+        // The '\r' rides on the line, so a mixed file round-trips too.
+        assert_eq!(split_lines(&mixed()).join("\n"), mixed(), "mixed must round-trip");
     }
 
     #[test]
@@ -1120,9 +1197,7 @@ mod tests {
         // changed (server.js's detectEOL matches this rule), so split_lines
         // is the one that has to tolerate this instead of splitting the
         // whole file on that single "\r\n" and losing the frontmatter.
-        let text = sample().replacen("Sample.\n", "Sample.\r\n", 1);
-
-        let ticket = Ticket::parse(Path::new(SAMPLE_NAME), &text).expect("must still parse");
+        let ticket = Ticket::parse(Path::new(SAMPLE_NAME), &mixed()).expect("must still parse");
 
         assert_eq!(ticket.id, "T-0042");
         assert_eq!(ticket.status, "open");
@@ -1164,6 +1239,148 @@ mod tests {
         ]
         .join("\n")
     }
+
+    /// `sample()` with one body line left with a CRLF ending, as an editor
+    /// that touched only that line would leave it. Everything else is LF.
+    fn mixed() -> String {
+        sample().replacen("Sample.\n", "Sample.\r\n", 1)
+    }
+
+    /// A vault root with `text` as its only ticket. Returns the ticket path.
+    fn scratch_ticket(tag: &str, text: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("tui-vault-test-{tag}"));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("tickets")).unwrap();
+        let path = root.join("tickets").join(SAMPLE_NAME);
+        fs::write(&path, text).unwrap();
+        path
+    }
+
+    /// The lines that differ, as raw bytes: `split('\n')` keeps the `'\r'` of a
+    /// CRLF line, so a changed line ending shows up as a changed line. The two
+    /// texts must have the same line count; these edits replace a line, they
+    /// add none.
+    fn changed_lines(before: &str, after: &str) -> Vec<String> {
+        let b: Vec<&str> = before.split('\n').collect();
+        let a: Vec<&str> = after.split('\n').collect();
+        assert_eq!(a.len(), b.len(), "a field edit must not change the line count");
+        a.iter().zip(&b).filter(|(x, y)| x != y).map(|(x, _)| x.to_string()).collect()
+    }
+
+    /// Set `due` on a copy of `before` and return the whole file back.
+    fn edit_due(tag: &str, before: &str) -> String {
+        let path = scratch_ticket(tag, before);
+        let root = path.parent().unwrap().parent().unwrap().to_path_buf();
+        set_field(&root, &path, "due", "2026-09-01").unwrap();
+        fs::read_to_string(&path).unwrap()
+    }
+
+    #[test]
+    fn an_lf_file_keeps_every_untouched_line_byte_identical() {
+        let before = sample();
+        let after = edit_due("eol-lf", &before);
+        assert_eq!(changed_lines(&before, &after), ["due: 2026-09-01"]);
+    }
+
+    #[test]
+    fn a_crlf_file_keeps_every_untouched_line_byte_identical() {
+        let before = sample().replace('\n', "\r\n");
+        let after = edit_due("eol-crlf", &before);
+        assert_eq!(changed_lines(&before, &after), ["due: 2026-09-01\r"]);
+    }
+
+    #[test]
+    fn a_mixed_file_keeps_every_untouched_line_byte_identical() {
+        // The one CRLF line is not the edited one, so it must survive as CRLF
+        // while the rest of the file stays LF. Joining on a single detected
+        // ending (the old behaviour) rewrites every line here.
+        let before = mixed();
+        let after = edit_due("eol-mixed", &before);
+        assert_eq!(changed_lines(&before, &after), ["due: 2026-09-01"]);
+        assert!(after.contains("Sample.\r\n"), "the one CRLF line must stay CRLF");
+    }
+
+    #[test]
+    fn a_line_added_to_a_mixed_file_uses_the_detected_ending() {
+        let before = mixed();
+        let path = scratch_ticket("eol-mixed-log", &before);
+
+        append_note(&path, "hello there").unwrap();
+
+        let after = fs::read_to_string(&path).unwrap();
+        // detect_eol calls this file CRLF, so a line this module builds is CRLF.
+        assert!(after.contains(" \u{2014} hello there\r\n"), "{after:?}");
+        assert!(after.contains("Sample.\r\n"), "the one CRLF line must stay CRLF");
+        assert!(after.starts_with("---\nid: T-0042\n"), "the LF lines must stay LF");
+    }
+
+    /// `sample()` with `eol` endings and no newline at EOF, as an editor that
+    /// does not add a final newline leaves it. The last line of `## Log` is
+    /// then the last line of the file, so a note lands right after it.
+    fn unterminated(eol: &str) -> String {
+        let text = sample().replace('\n', eol);
+        text.strip_suffix(eol).expect("sample() ends with a newline").to_string()
+    }
+
+    /// Check the raw bytes. In a CRLF file, removing every CRLF pair must
+    /// leave no '\n' (that would be a bare LF) and no '\r' (a lone CR). In an
+    /// LF file there must be no '\r' at all.
+    fn assert_uniform_eol(text: &str, crlf: bool) {
+        if crlf {
+            let rest = text.replace("\r\n", "");
+            assert!(!rest.contains('\n'), "a bare LF leaked in: {text:?}");
+            assert!(!rest.contains('\r'), "a lone CR leaked in: {text:?}");
+            assert!(text.contains("\r\n"), "not a CRLF file at all: {text:?}");
+        } else {
+            assert!(!text.contains('\r'), "a '\\r' leaked into an LF file: {text:?}");
+        }
+    }
+
+    #[test]
+    fn a_note_appended_to_a_crlf_file_with_no_final_newline_stays_crlf() {
+        let before = unterminated("\r\n");
+        let path = scratch_ticket("eol-crlf-unterminated", &before);
+
+        append_note(&path, "hello there").unwrap();
+
+        let after = fs::read_to_string(&path).unwrap();
+        assert_uniform_eol(&after, true);
+        // The old last line got the ending it was missing; the new one has it too.
+        assert!(after.contains("- 2026-08-09 09:00 \u{2014} created\r\n"), "{after:?}");
+        assert!(after.contains(" \u{2014} hello there\r\n"), "{after:?}");
+        let _ = fs::remove_dir_all(path.parent().unwrap().parent().unwrap());
+    }
+
+    #[test]
+    fn a_note_appended_to_an_lf_file_with_no_final_newline_stays_lf() {
+        let before = unterminated("\n");
+        let path = scratch_ticket("eol-lf-unterminated", &before);
+
+        append_note(&path, "hello there").unwrap();
+
+        let after = fs::read_to_string(&path).unwrap();
+        assert_uniform_eol(&after, false);
+        assert!(after.contains("- 2026-08-09 09:00 \u{2014} created\n"), "{after:?}");
+        assert!(after.contains(" \u{2014} hello there\n"), "{after:?}");
+        let _ = fs::remove_dir_all(path.parent().unwrap().parent().unwrap());
+    }
+
+    #[test]
+    fn a_status_change_on_a_crlf_file_with_no_final_newline_stays_crlf() {
+        // change_status adds a Log line through the same function, so it needs
+        // the same repair of the missing final newline.
+        let before = unterminated("\r\n");
+        let path = scratch_ticket("eol-crlf-unterminated-status", &before);
+
+        change_status(&path, "review", Some("PR up")).unwrap();
+
+        let after = fs::read_to_string(&path).unwrap();
+        assert_uniform_eol(&after, true);
+        assert!(after.contains("status: review\r\n"), "{after:?}");
+        assert!(after.contains(" \u{2014} PR up\r\n"), "{after:?}");
+        let _ = fs::remove_dir_all(path.parent().unwrap().parent().unwrap());
+    }
+
 
     #[test]
     fn quote_yaml_escapes_backslashes_and_quotes() {
@@ -1291,6 +1508,7 @@ mod tests {
             (SAMPLE_NAME, swap("created: 2026-08-09\n", ""), "missing created"),
             (SAMPLE_NAME, swap("due: ", "due: 9/8/2026"), "bad due \"9/8/2026\""),
             (SAMPLE_NAME, swap("status: open", "status: done"), "status done but closed is empty"),
+
             (
                 SAMPLE_NAME,
                 swap("branch: T-0042-sample", "branch: feature/x"),
