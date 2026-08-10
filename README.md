@@ -61,8 +61,9 @@ setx USHER_VAULT C:\path\to\your\vault   # default vault, applies to new shells
 usher                                    # start from anywhere
 ```
 
-usher finds the vault in this order: CLI argument, then `USHER_VAULT`, then the current directory.
-See [`tui/README.md`](tui/README.md) for the keys and the WSL build.
+All three front ends resolve the vault in the same order: CLI argument, then `USHER_VAULT`,
+then a per-front-end default (`../obsidian` for web/desktop, the current directory for the TUI).
+See [`tui/README.md`](tui/README.md) for the TUI's keys and WSL build.
 
 ## The vault format
 
