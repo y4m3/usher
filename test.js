@@ -7,7 +7,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
 
-const REAL_VAULT = path.join(__dirname, "..", "obsidian");
+const REAL_VAULT = path.join(__dirname, "tests", "fixtures", "vault");
 let BASE; // set after the child server reports the port that the OS gave it
 
 // The vault dates are local dates, like todayDate() in server.js. Do not use
@@ -462,12 +462,10 @@ async function main() {
   fs.mkdirSync(path.join(fakeVault, "tickets"), { recursive: true });
   fs.mkdirSync(path.join(fakeVault, "projects"), { recursive: true });
   fs.mkdirSync(path.join(fakeVault, "system", "scripts"), { recursive: true });
-  for (const name of fs.readdirSync(path.join(REAL_VAULT, "tickets"))) {
-    fs.copyFileSync(path.join(REAL_VAULT, "tickets", name), path.join(fakeVault, "tickets", name));
-  }
-  for (const name of fs.readdirSync(path.join(REAL_VAULT, "projects"))) {
-    fs.copyFileSync(path.join(REAL_VAULT, "projects", name), path.join(fakeVault, "projects", name));
-  }
+  fs.cpSync(path.join(REAL_VAULT, "tickets"), path.join(fakeVault, "tickets"), { recursive: true });
+  // recursive: projects/ can hold folder notes (projects/<name>/<name>.md), and
+  // copyFileSync would EPERM on a directory entry.
+  fs.cpSync(path.join(REAL_VAULT, "projects"), path.join(fakeVault, "projects"), { recursive: true });
   fs.copyFileSync(
     path.join(REAL_VAULT, "system", "scripts", "check_vault.js"),
     path.join(fakeVault, "system", "scripts", "check_vault.js")

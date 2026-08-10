@@ -145,6 +145,9 @@ usher does not normalize the vault format:
 
 ## Tests
 
+Both suites read `tests/fixtures/vault`, a fixture checked into the repo, so no
+external vault setup is needed.
+
 ```
 node test.js           # web: throwaway vault copy + OS-assigned port
 cd tui && cargo test   # TUI: Windows native or WSL

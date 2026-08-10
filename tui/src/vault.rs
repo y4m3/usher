@@ -721,13 +721,10 @@ fn unlink(value: &str) -> String {
 mod tests {
     use super::*;
 
-    /// Read-only source of real fixtures. The tests never write to it.
-    fn source() -> &'static str {
-        if cfg!(windows) {
-            r"C:\Users\dummy\projects\obsidian"
-        } else {
-            "/mnt/c/Users/dummy/projects/obsidian"
-        }
+    /// Read-only source of the fixture vault, checked into the repo. The tests
+    /// never write to it.
+    fn source() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/vault")
     }
 
     fn temp_vault(tag: &str) -> PathBuf {
@@ -736,7 +733,7 @@ mod tests {
         for folder in ["tickets", "projects"] {
             let dir = root.join(folder);
             fs::create_dir_all(&dir).unwrap();
-            for entry in fs::read_dir(Path::new(source()).join(folder)).unwrap() {
+            for entry in fs::read_dir(source().join(folder)).unwrap() {
                 let src = entry.unwrap().path();
                 if src.extension().is_some_and(|e| e == "md") {
                     fs::copy(&src, dir.join(src.file_name().unwrap())).unwrap();
