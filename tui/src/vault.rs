@@ -423,6 +423,17 @@ pub fn lint_content(file_name: &str, text: &str) -> Vec<String> {
     let raw = |key: &str| fm_get(fm, key);
     let get = |key: &str| raw(key).map(|v| unquote(&v));
 
+    // check_vault.js reports a duplicate while it parses the frontmatter, so
+    // this comes before the field checks. The first key still wins everywhere
+    // else, in both front ends; a duplicate is a schema error, not a conflict
+    // to resolve quietly.
+    let mut seen: Vec<&str> = Vec::new();
+    for (key, _) in fm.iter().filter_map(|l| parse_kv(l)) {
+        if seen.contains(&key) {
+            errors.push(format!("duplicate frontmatter key \"{key}\""));
+        }
+        seen.push(key);
+    }
 
     let id = get("id").unwrap_or_default();
     if !is_ticket_id(&id) {
@@ -478,7 +489,16 @@ pub fn lint_content(file_name: &str, text: &str) -> Vec<String> {
     if status.as_deref() == Some("done") && get("closed").unwrap_or_default().is_empty() {
         errors.push("status done but closed is empty".to_string());
     }
-
+    if !get("closed").unwrap_or_default().is_empty()
+        && !matches!(status.as_deref(), Some("done" | "archived"))
+    {
+        // "undefined" for a missing status: check_vault.js interpolates the
+        // JS value, and this message must match it word for word.
+        errors.push(format!(
+            "closed is set but status is \"{}\" (want done or archived)",
+            status.as_deref().unwrap_or("undefined")
+        ));
+    }
     let branch = get("branch").unwrap_or_default();
     if !branch.is_empty() && !branch.starts_with(&id) {
         errors.push(format!("branch \"{branch}\" does not start with {id}"));
@@ -624,10 +644,12 @@ fn frontmatter_end(lines: &[String]) -> Result<usize, String> {
 
 /// `key: value`. This is the Rust form of `^(\w+):\s*(.*)$` in check_vault.js.
 /// An indented list item (`  - "[[repo]]"`) fails the key test. This function
-/// skips it.
+/// skips it. JavaScript's `\w` is ASCII-only (the regex has no `u` flag), so
+/// the key test is `is_ascii_alphanumeric`, not `is_alphanumeric`: a line like
+/// `é: x` is a key for neither front end.
 fn parse_kv(line: &str) -> Option<(&str, &str)> {
     let (key, value) = line.split_once(':')?;
-    if key.is_empty() || !key.chars().all(|c| c.is_alphanumeric() || c == '_') {
+    if key.is_empty() || !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
         return None;
     }
     Some((key, value.trim()))
@@ -1381,6 +1403,26 @@ mod tests {
         let _ = fs::remove_dir_all(path.parent().unwrap().parent().unwrap());
     }
 
+    #[test]
+    fn parse_kv_takes_ascii_keys_only_like_the_node_regex() {
+        assert_eq!(parse_kv("status: open"), Some(("status", "open")));
+        assert_eq!(parse_kv("my_key2:  v "), Some(("my_key2", "v")));
+        // JS `\w` has no `u` flag, so check_vault.js sees no key on these lines.
+        assert_eq!(parse_kv("\u{e9}: 1"), None);
+        assert_eq!(parse_kv("\u{30ad}\u{30fc}: 1"), None);
+        assert_eq!(parse_kv("  - item"), None);
+    }
+
+    #[test]
+    fn a_repeated_non_ascii_key_is_no_duplicate_for_either_front_end() {
+        let text = sample().replace(
+            "status: open",
+            "status: open\n\u{e9}: 1\n\u{e9}: 2\n\u{e9}: 3",
+        );
+
+        // check_vault.js reports nothing here, so neither may this.
+        assert!(lint_content(SAMPLE_NAME, &text).is_empty(), "{:?}", lint_content(SAMPLE_NAME, &text));
+    }
 
     #[test]
     fn quote_yaml_escapes_backslashes_and_quotes() {
@@ -1508,7 +1550,17 @@ mod tests {
             (SAMPLE_NAME, swap("created: 2026-08-09\n", ""), "missing created"),
             (SAMPLE_NAME, swap("due: ", "due: 9/8/2026"), "bad due \"9/8/2026\""),
             (SAMPLE_NAME, swap("status: open", "status: done"), "status done but closed is empty"),
-
+            (
+                SAMPLE_NAME,
+                swap("closed: ", "closed: 2026-01-01"),
+                "closed is set but status is \"open\" (want done or archived)",
+            ),
+            // The first key wins, so the second `status:` adds no other error.
+            (
+                SAMPLE_NAME,
+                swap("status: open", "status: open\nstatus: doing"),
+                "duplicate frontmatter key \"status\"",
+            ),
             (
                 SAMPLE_NAME,
                 swap("branch: T-0042-sample", "branch: feature/x"),
