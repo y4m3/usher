@@ -47,6 +47,10 @@ fn main() {
             Err(_) => command.arg(vault),
         };
     }
+    // server.js honours PORT; the shell's URL (tauri.conf.json) and wait_for_port
+    // below are fixed at 3000, so pin the child to that port regardless of the
+    // parent environment's PORT.
+    command.env("PORT", "3000");
     #[cfg(windows)]
     command.creation_flags(CREATE_NO_WINDOW);
 
