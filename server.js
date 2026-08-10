@@ -89,13 +89,24 @@ function findTicketFile(id) {
   return name ? path.join(ticketsDir, name) : null;
 }
 
+// A project note is either projects/<name>.md, or projects/<name>/<name>.md
+// when the vault uses one folder per project (an Obsidian folder note). Only
+// the top level is scanned, so the theme folders that may live inside a
+// project folder do not end up in the list.
 function listProjects() {
   if (!fs.existsSync(projectsDir)) return [];
-  return fs.readdirSync(projectsDir).filter((n) => n.endsWith(".md")).map((n) => n.slice(0, -3));
+  return fs.readdirSync(projectsDir, { withFileTypes: true }).flatMap((entry) => {
+    if (entry.isFile() && entry.name.endsWith(".md")) return [entry.name.slice(0, -3)];
+    if (entry.isDirectory() && fs.existsSync(path.join(projectsDir, entry.name, `${entry.name}.md`)))
+      return [entry.name];
+    return [];
+  }).sort();
 }
 
+// Checked against the list, not against a built path, so that a name with a
+// separator or ".." in it can never resolve to a file outside projects/.
 function projectExists(name) {
-  return fs.existsSync(path.join(projectsDir, `${name}.md`));
+  return listProjects().includes(name);
 }
 
 function detectEOL(text) {

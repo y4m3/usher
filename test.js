@@ -230,11 +230,75 @@ async function runTests(fakeVault, checkVault) {
     assert(checkVault(fakeVault).length === 0, "fields: vault still lints clean (due clear)");
   }
 
-  // GET /api/projects gives the file names of projects/*.md, without the
-  // extension.
+  // GET /api/projects gives the top-level project names: projects/<name>.md
+  // (flat) and projects/<name>/<name>.md (Obsidian folder note). A theme note
+  // one level below a project folder, and a folder with no matching note, must
+  // not show up.
   {
     const list = await fetch(BASE + "/api/projects").then((r) => r.json());
-    assert(Array.isArray(list) && list.includes("vault-bootstrap"), `GET /api/projects lists project basenames (got ${JSON.stringify(list)})`);
+    assert(
+      JSON.stringify(list) === JSON.stringify(["folder-note-demo", "vault-bootstrap"]),
+      `GET /api/projects lists folder-note and flat projects only (got ${JSON.stringify(list)})`
+    );
+  }
+
+  // Create: a folder-note project ("projects/<name>/<name>.md") is a valid
+  // project. The frontmatter wikilinks its base name, same as a flat project.
+  {
+    const res = await fetch(BASE + "/api/tickets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Folder note ticket", project: "folder-note-demo" }),
+    });
+    const body = await res.json();
+    assert(res.ok, `create (folder-note project): request succeeds (got ${JSON.stringify(body)})`);
+    const content = fs.readFileSync(path.join(fakeVault, body.file), "utf8");
+    assert(content.includes('project: "[[folder-note-demo]]"'), "create (folder-note project): frontmatter wikilinks the base name");
+    assert(checkVault(fakeVault).length === 0, "create (folder-note project): vault still lints clean");
+  }
+
+  // Create: a flat project ("projects/<name>.md") still works as before.
+  {
+    const res = await fetch(BASE + "/api/tickets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Flat project ticket", project: "vault-bootstrap" }),
+    });
+    const body = await res.json();
+    assert(res.ok, `create (flat project): request succeeds (got ${JSON.stringify(body)})`);
+    const content = fs.readFileSync(path.join(fakeVault, body.file), "utf8");
+    assert(content.includes('project: "[[vault-bootstrap]]"'), "create (flat project): frontmatter wikilinks the base name");
+  }
+
+  // Create: a theme note one level below a project folder is not itself a
+  // project.
+  {
+    const res = await fetch(BASE + "/api/tickets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Theme note ticket", project: "theme-note" }),
+    });
+    assert(res.status === 400, `create (theme-note as project): rejected with 400 (got ${res.status})`);
+  }
+
+  // Create: a project folder with no matching note is not a project.
+  {
+    const res = await fetch(BASE + "/api/tickets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "No-note-folder ticket", project: "no-note-folder" }),
+    });
+    assert(res.status === 400, `create (no-note-folder as project): rejected with 400 (got ${res.status})`);
+  }
+
+  // Create: a project name cannot escape projects/ via a path.
+  {
+    const res = await fetch(BASE + "/api/tickets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Traversal ticket", project: "../../../etc/passwd" }),
+    });
+    assert(res.status === 400, `create (path traversal project): rejected with 400 (got ${res.status})`);
   }
 
   // fields: a project change touches only the project line.
