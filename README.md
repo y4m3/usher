@@ -117,7 +117,7 @@ Rules:
 - **Frontmatter fields**, always present, in this order: `id`, `title`, `status`, `priority`, `project`, `repos`, `tags`, `created`, `due`, `closed`, `branch`.
 - An empty scalar value keeps one space after the colon (`due: `). usher keeps that byte.
 - **`status`** is one of: `open`, `doing`, `review`, `done`, `archived`. The board shows the first four.
-- **`closed`** dates the day the work finished. A move to `done` sets it. A move to anything but `done` or `archived` clears it, so the date never outlives the work it describes; `archived` is the exception, so a finished ticket keeps its date when it is filed away.
+- **`closed`** dates the day the work finished. A move to `done` sets it. A move to anything but `done` or `archived` clears it, so the date never outlives the work it describes; `archived` is the exception, so a finished ticket keeps its date when it is filed away. The lint enforces both directions: `done` without a date, and a date without `done` or `archived`.
 - **`priority`** is one of: `urgent`, `high`, `normal`, `low`.
 - **Body sections**, in this order: `## Summary`, `## Notes`, `## Log`.
 - usher edits Summary and Notes. Log is append-only, one line for each entry: `- YYYY-MM-DD HH:mm — message`.

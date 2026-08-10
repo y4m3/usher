@@ -21,12 +21,43 @@ const PRIORITY = ["urgent", "high", "normal", "low"];
 const ID_RE = /^T-\d{4}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TAG_RE = /^[A-Za-z0-9_][A-Za-z0-9_/-]*$/;
+// The closing "---" must end the line (only trailing spaces/tabs allowed), or
+// text like "---oops" would be accepted as the terminator. The lookahead does
+// not consume the newline, so `m[0]` still ends right after "---", same as
+// before.
+const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---(?=[ \t]*\r?\n|[ \t]*$)/;
+
+// The escapes this vault actually needs from a YAML double-quoted scalar.
+// Kept identical in check_vault.js, which validates against the same table.
+const YAML_ESCAPES = { "\\": "\\", '"': '"', "/": "/", n: "\n", t: "\t", r: "\r", 0: "\0" };
+
+// Resolve the escapes inside the (already unwrapped) body of a double-quoted
+// scalar. An escape outside the table above is unknown: leave the backslash
+// in place rather than guess, so the value is never silently corrupted.
+// check_vault.js flags what this leaves behind.
+//
+// \uD800-\uDFFF (the surrogate range) is also left as-is: Rust's
+// char::from_u32 rejects lone surrogates and does not compose surrogate
+// pairs, so treating a surrogate \uXXXX as unknown is the only reading both
+// front ends agree on. An astral character (above U+FFFF) still works fine
+// written literally in the file as UTF-8 — this only affects the \uXXXX
+// escape form.
+function unescapeYaml(body) {
+  return body.replace(/\\(?:u([0-9a-fA-F]{4})|x([0-9a-fA-F]{2})|(.))/g, (full, u, x, ch) => {
+    if (u !== undefined) {
+      const code = parseInt(u, 16);
+      return code >= 0xd800 && code <= 0xdfff ? full : String.fromCodePoint(code);
+    }
+    if (x !== undefined) return String.fromCodePoint(parseInt(x, 16));
+    return Object.hasOwn(YAML_ESCAPES, ch) ? YAML_ESCAPES[ch] : full;
+  });
+}
 
 // The same rule as check_vault.js: remove correct quotes around the value.
 function unquote(v) {
   if (v == null) return "";
   let m = /^"((?:[^"\\]|\\.)*)"$/.exec(v);
-  if (m) return m[1].replace(/\\(.)/g, "$1");
+  if (m) return unescapeYaml(m[1]);
   m = /^'([^']*)'$/.exec(v);
   return m ? m[1] : v;
 }
@@ -37,12 +68,13 @@ function unwikilink(v) {
 }
 
 function parseFrontmatter(text) {
-  const m = text.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  const m = text.match(FRONTMATTER_RE);
   if (!m) return null;
   const fm = {};
   for (const line of m[1].split(/\r?\n/)) {
     const kv = line.match(/^(\w+):\s*(.*)$/);
-    if (kv) fm[kv[1]] = kv[2].trim();
+    // First key wins on a duplicate, same as the TUI (Rust side) parser.
+    if (kv && !(kv[1] in fm)) fm[kv[1]] = kv[2].trim();
   }
   return fm;
 }
@@ -51,7 +83,7 @@ function parseFrontmatter(text) {
 // does not read a `tags:` block list (indented `  - item` lines). This function
 // scans for them. It reads both `tags: []` and a block list.
 function parseTags(text) {
-  const m = text.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  const m = text.match(FRONTMATTER_RE);
   if (!m) return [];
   const lines = m[1].split(/\r?\n/);
   const idx = lines.findIndex((l) => /^tags:/.test(l));
@@ -97,8 +129,10 @@ function listProjects() {
   if (!fs.existsSync(projectsDir)) return [];
   return fs.readdirSync(projectsDir, { withFileTypes: true }).flatMap((entry) => {
     if (entry.isFile() && entry.name.endsWith(".md")) return [entry.name.slice(0, -3)];
-    if (entry.isDirectory() && fs.existsSync(path.join(projectsDir, entry.name, `${entry.name}.md`)))
-      return [entry.name];
+    if (entry.isDirectory()) {
+      const note = fs.statSync(path.join(projectsDir, entry.name, `${entry.name}.md`), { throwIfNoEntry: false });
+      if (note && note.isFile()) return [entry.name];
+    }
     return [];
   }).sort();
 }
@@ -130,7 +164,7 @@ function nowStamp() {
 // Replace the value of one `key: value` line in the frontmatter block. Do not
 // change any other byte in the file.
 function setFrontmatterField(text, key, value) {
-  const m = text.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  const m = text.match(FRONTMATTER_RE);
   if (!m) throw new Error("missing frontmatter");
   const block = m[0];
   const re = new RegExp(`^${key}:[^\\r\\n]*`, "m");
@@ -145,7 +179,7 @@ function setFrontmatterField(text, key, value) {
 // and its `  - item` lines. Do not change any other line, in the frontmatter or
 // in the body.
 function setTagsBlock(text, tags) {
-  const fm = text.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  const fm = text.match(FRONTMATTER_RE);
   if (!fm) throw new Error("missing frontmatter");
   const block = text.slice(0, fm.index + fm[0].length);
   const m = block.match(/^tags:[^\r\n]*\r?\n(?:[ \t]+-[^\r\n]*\r?\n)*/m);
@@ -404,8 +438,9 @@ const server = http.createServer(async (req, res) => {
         writeTicket(file, (text) => {
           text = setFrontmatterField(text, "status", body.status);
           if (body.status === "done") text = setFrontmatterField(text, "closed", todayDate());
-          // Leaving done clears closed again, except to archived: that keeps
-          // the record of when the work finished.
+          // Only the new status decides: moving to anything but done or
+          // archived clears closed, moving to archived leaves it alone. That
+          // is what keeps closed as the record of when the work finished.
           else if (body.status !== "archived") text = setFrontmatterField(text, "closed", "");
           const msg = logMessageFor(body.status, body.note);
           return appendLog(text, `- ${nowStamp()} — ${msg}`);

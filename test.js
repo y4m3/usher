@@ -75,6 +75,39 @@ function currentMaxId(fakeVault) {
   return max;
 }
 
+// Copy tickets/ + projects/ + system/scripts/check_vault.js from the real
+// fixture vault into `dest`. Shared by main()'s server-backed fakeVault and by
+// the throwaway copies the lint tests below break on purpose — the committed
+// fixture vault itself must stay lint-clean.
+function copyVaultInto(dest) {
+  fs.mkdirSync(path.join(dest, "tickets"), { recursive: true });
+  fs.mkdirSync(path.join(dest, "projects"), { recursive: true });
+  fs.mkdirSync(path.join(dest, "system", "scripts"), { recursive: true });
+  fs.cpSync(path.join(REAL_VAULT, "tickets"), path.join(dest, "tickets"), { recursive: true });
+  // recursive: projects/ can hold folder notes (projects/<name>/<name>.md), and
+  // copyFileSync would EPERM on a directory entry.
+  fs.cpSync(path.join(REAL_VAULT, "projects"), path.join(dest, "projects"), { recursive: true });
+  fs.copyFileSync(
+    path.join(REAL_VAULT, "system", "scripts", "check_vault.js"),
+    path.join(dest, "system", "scripts", "check_vault.js")
+  );
+}
+
+// Copy the vault into a throwaway temp dir, let `breakFn` corrupt it, and
+// return the resulting checkVault errors. Used for lint tests that need a
+// broken ticket to fail against.
+function lintBrokenVault(breakFn) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "usher-lint-"));
+  try {
+    copyVaultInto(tmp);
+    breakFn(tmp);
+    const brokenCheckVault = require(path.join(tmp, "system", "scripts", "check_vault.js"));
+    return brokenCheckVault(tmp);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
 async function runTests(fakeVault, checkVault) {
   const list = await fetch(BASE + "/api/tickets").then((r) => r.json());
   assert(list.length === 7, `GET /api/tickets returns 7 tickets, incl. CRLF fixture (got ${list.length})`);
@@ -137,9 +170,10 @@ async function runTests(fakeVault, checkVault) {
     assert(after === before, "same-status POST: file byte-identical");
   }
 
-  // Leaving done for anything but archived clears closed. The lint only
-  // checks "done but closed empty", never the reverse, so a stale closed date
-  // would otherwise survive a reopen.
+  // Leaving done for anything but archived clears closed. The lint rejects a
+  // closed date on a ticket that is neither done nor archived — the lint tests
+  // further down cover that rule itself — so a reopen that kept the date would
+  // write a ticket the vault refuses. What this block checks is the clearing.
   {
     const file = ticketFile(fakeVault, "T-0002"); // currently done, closed set above
     const res = await fetch(BASE + "/api/tickets/T-0002/status", {
@@ -568,22 +602,165 @@ async function runTests(fakeVault, checkVault) {
     const res = await fetch(BASE + "/api/tickets/" + encodeURIComponent("../../etc/passwd"));
     assert(res.status === 400, `path traversal id rejected with 400 (got ${res.status})`);
   }
+
+  // Duplicate frontmatter keys must be rejected. parseFrontmatter reads
+  // first-wins (to match the TUI), so a duplicate key is a real ambiguity
+  // between "what the file means" and "what a naive second read would give
+  // you" — not something to resolve quietly.
+  {
+    const errors = lintBrokenVault((tmp) => {
+      const file = ticketFile(tmp, "T-0002"); // status: open
+      const text = fs.readFileSync(file, "utf8");
+      fs.writeFileSync(file, text.replace("status: open\n", "status: open\nstatus: doing\n"), "utf8");
+    });
+    assert(
+      errors.some((e) => /duplicate frontmatter key "status"/.test(e)),
+      `lint rejects a duplicate frontmatter key (got ${JSON.stringify(errors)})`
+    );
+  }
+
+  // A frontmatter terminator that isn't exactly "---" on its own line must be
+  // rejected, e.g. "---oops" — the TUI requires an exact match.
+  {
+    const errors = lintBrokenVault((tmp) => {
+      const file = ticketFile(tmp, "T-0002");
+      const lines = fs.readFileSync(file, "utf8").split("\n");
+      const closeIdx = lines.indexOf("---", 1); // the closing "---", not the opening one
+      lines[closeIdx] = "---oops";
+      fs.writeFileSync(file, lines.join("\n"), "utf8");
+    });
+    assert(
+      errors.some((e) => /missing frontmatter/.test(e)),
+      `lint rejects a "---oops" frontmatter terminator (got ${JSON.stringify(errors)})`
+    );
+  }
+
+  // A title with an escape outside the supported table (\\ \" \/ \n \t \r \0
+  // \uXXXX \xXX) must be rejected, not silently corrupted.
+  {
+    const errors = lintBrokenVault((tmp) => {
+      const file = ticketFile(tmp, "T-0002");
+      const text = fs.readFileSync(file, "utf8");
+      fs.writeFileSync(file, text.replace(/^title: .*$/m, 'title: "bad\\q"'), "utf8");
+    });
+    assert(
+      errors.some((e) => /unknown escape in title/.test(e)),
+      `lint rejects an unknown escape in title (got ${JSON.stringify(errors)})`
+    );
+  }
+
+  // A lone surrogate escape (\uD800) must be rejected too: Rust's
+  // char::from_u32 refuses a surrogate scalar, so unescapeYaml/hasUnknownEscape
+  // treat the whole \uD800-\uDFFF range as an unknown escape in both front
+  // ends. Without this, Node would decode it (as a UTF-16 code unit) while
+  // Rust would not, and the lint would let the mismatch through.
+  {
+    const errors = lintBrokenVault((tmp) => {
+      const file = ticketFile(tmp, "T-0002");
+      const text = fs.readFileSync(file, "utf8");
+      fs.writeFileSync(file, text.replace(/^title: .*$/m, 'title: "bad\\uD800"'), "utf8");
+    });
+    assert(
+      errors.some((e) => /unknown escape in title/.test(e)),
+      `lint rejects a lone surrogate \\uXXXX escape in title (got ${JSON.stringify(errors)})`
+    );
+  }
+
+  // A surrogate-pair escape (😀, the two UTF-16 halves of U+1F600
+  // "grinning face") is rejected the same way: Rust does not compose
+  // surrogate pairs from two \uXXXX escapes, so neither half is known.
+  {
+    const errors = lintBrokenVault((tmp) => {
+      const file = ticketFile(tmp, "T-0002");
+      const text = fs.readFileSync(file, "utf8");
+      fs.writeFileSync(file, text.replace(/^title: .*$/m, 'title: "bad\\uD83D\\uDE00"'), "utf8");
+    });
+    assert(
+      errors.some((e) => /unknown escape in title/.test(e)),
+      `lint rejects a surrogate-pair \\uXXXX escape in title (got ${JSON.stringify(errors)})`
+    );
+  }
+
+  // closed set while status is open contradicts the schema — closed may only
+  // be set once status reaches done or archived. This is the mirror of the
+  // existing "done but closed empty" check.
+  {
+    const errors = lintBrokenVault((tmp) => {
+      const file = ticketFile(tmp, "T-0002"); // status: open, closed: (empty)
+      const text = fs.readFileSync(file, "utf8");
+      fs.writeFileSync(file, text.replace("closed: \n", "closed: 2026-01-01\n"), "utf8");
+    });
+    assert(
+      errors.some((e) => /closed is set but status is "open"/.test(e)),
+      `lint rejects closed set while status is open (got ${JSON.stringify(errors)})`
+    );
+  }
+
+  // unquote() decodes the YAML double-quoted escapes this vault needs: a
+  // \uXXXX code point, a literal backslash, and a tab. Written straight into
+  // the fakeVault (not the committed fixture) since these are valid,
+  // lint-clean tickets.
+  {
+    const escapeFixture = (id, rawTitle) =>
+      [
+        "---",
+        `id: ${id}`,
+        `title: "${rawTitle}"`,
+        "status: open",
+        "priority: normal",
+        "project: ",
+        "repos: []",
+        "tags: []",
+        "created: 2026-08-09",
+        "due: ",
+        "closed: ",
+        "branch: ",
+        "---",
+        "",
+        "## Summary",
+        "",
+        "Fixture for verifying YAML escape decoding.",
+        "",
+        "## Notes",
+        "",
+        "- ",
+        "",
+        "## Log",
+        "",
+        "- 2026-08-09 00:00 — created",
+        "",
+      ].join("\n");
+    fs.writeFileSync(path.join(fakeVault, "tickets", "T-0910-escape-unicode.md"), escapeFixture("T-0910", "Smile \\u263A"), "utf8");
+    fs.writeFileSync(path.join(fakeVault, "tickets", "T-0911-escape-backslash.md"), escapeFixture("T-0911", "a\\\\b"), "utf8");
+    fs.writeFileSync(path.join(fakeVault, "tickets", "T-0912-escape-tab.md"), escapeFixture("T-0912", "tab\\there"), "utf8");
+    // An astral character (above U+FFFF) written literally, not as a \uXXXX
+    // escape, is not affected by the surrogate-escape rejection above — both
+    // front ends read raw UTF-8 the same way.
+    fs.writeFileSync(path.join(fakeVault, "tickets", "T-0913-escape-literal-astral.md"), escapeFixture("T-0913", "Smile 😀"), "utf8");
+    assert(checkVault(fakeVault).length === 0, "escape fixtures: vault still lints clean");
+    const list = await fetch(BASE + "/api/tickets").then((r) => r.json());
+    const byId = (id) => list.find((t) => t.id === id);
+    assert(byId("T-0910")?.title === "Smile ☺", `\\uXXXX decodes to the code point (got ${JSON.stringify(byId("T-0910")?.title)})`);
+    assert(byId("T-0911")?.title === "a\\b", `\\\\ decodes to one backslash (got ${JSON.stringify(byId("T-0911")?.title)})`);
+    assert(byId("T-0912")?.title === "tab\there", `\\t decodes to a tab (got ${JSON.stringify(byId("T-0912")?.title)})`);
+    assert(byId("T-0913")?.title === "Smile 😀", `a literal astral character round-trips as-is (got ${JSON.stringify(byId("T-0913")?.title)})`);
+  }
+
+  // A folder note project only counts if projects/<name>/<name>.md is a file.
+  // A same-named directory (an Obsidian artifact, or just a mistake) must not
+  // turn a folder into a project.
+  {
+    fs.mkdirSync(path.join(fakeVault, "projects", "ghost", "ghost.md"), { recursive: true });
+    const list = await fetch(BASE + "/api/projects").then((r) => r.json());
+    assert(!list.includes("ghost"), `GET /api/projects excludes a folder note that is itself a directory (got ${JSON.stringify(list)})`);
+  }
+
 }
 
 async function main() {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "usher-test-"));
   const fakeVault = path.join(tmp, "vault");
-  fs.mkdirSync(path.join(fakeVault, "tickets"), { recursive: true });
-  fs.mkdirSync(path.join(fakeVault, "projects"), { recursive: true });
-  fs.mkdirSync(path.join(fakeVault, "system", "scripts"), { recursive: true });
-  fs.cpSync(path.join(REAL_VAULT, "tickets"), path.join(fakeVault, "tickets"), { recursive: true });
-  // recursive: projects/ can hold folder notes (projects/<name>/<name>.md), and
-  // copyFileSync would EPERM on a directory entry.
-  fs.cpSync(path.join(REAL_VAULT, "projects"), path.join(fakeVault, "projects"), { recursive: true });
-  fs.copyFileSync(
-    path.join(REAL_VAULT, "system", "scripts", "check_vault.js"),
-    path.join(fakeVault, "system", "scripts", "check_vault.js")
-  );
+  copyVaultInto(fakeVault);
   const checkVault = require(path.join(fakeVault, "system", "scripts", "check_vault.js"));
 
   // A fixture with CRLF line endings. It shows if a section write keeps the line

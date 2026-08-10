@@ -118,8 +118,9 @@ pub fn change_status(path: &Path, new_status: &str, note: Option<&str>) -> Resul
     if new_status == "done" {
         fm_set(&mut lines[1..end], "closed", &today())?;
     } else if new_status != "archived" {
-        // Leaving done clears closed again, except to archived: that keeps
-        // the record of when the work finished.
+        // Moving to any status other than done or archived clears closed.
+        // Archived is the one exception, so that a done ticket which is later
+        // archived keeps the date its work finished.
         fm_set(&mut lines[1..end], "closed", "")?;
     }
     append_log_line(&mut lines, &transition_note(new_status, note))?;
@@ -567,22 +568,32 @@ fn detect_eol(text: &str) -> &'static str {
     if text.contains("\r\n") { "\r\n" } else { "\n" }
 }
 
-/// This function splits on the line ending of the file. A join with the same
-/// line ending gives the same bytes. Thus a line that no edit touches stays
-/// the same.
+/// Split on `'\n'`, then drop one trailing `'\r'` from each line. A file that
+/// uses only one line-ending style round-trips: `split_lines(text).join(eol)`
+/// (with `eol` from `detect_eol`) gives back the same bytes, so a line that no
+/// edit touches stays the same. A file with mixed endings does not
+/// round-trip; a write normalizes it to the single ending `detect_eol`
+/// returns for that file.
 fn split_lines(text: &str) -> Vec<String> {
-    text.split(detect_eol(text)).map(str::to_string).collect()
+    text.split('\n').map(|l| l.strip_suffix('\r').unwrap_or(l).to_string()).collect()
 }
 
+/// Trailing run a fence line may carry. Spaces and tabs only, to match the
+/// `[ \t]*` in server.js and check_vault.js: `trim_end` would also accept a
+/// no-break space and other Unicode whitespace, and then a file ending
+/// `---\u{a0}` would read as valid here and as `missing frontmatter` there.
+/// `split_lines` has already taken the '\r' off.
+const FENCE_PAD: [char; 2] = [' ', '\t'];
+
 fn frontmatter_end(lines: &[String]) -> Result<usize, String> {
-    if lines.first().map(|l| l.trim_end()) != Some("---") {
+    if lines.first().map(|l| l.trim_end_matches(FENCE_PAD)) != Some("---") {
         return Err("missing frontmatter".to_string());
     }
     lines
         .iter()
         .enumerate()
         .skip(1)
-        .find(|(_, l)| l.trim_end() == "---")
+        .find(|(_, l)| l.trim_end_matches(FENCE_PAD) == "---")
         .map(|(i, _)| i)
         .ok_or_else(|| "unterminated frontmatter".to_string())
 }
@@ -706,52 +717,115 @@ fn is_valid_tag(value: &str) -> bool {
         && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '/' | '-'))
 }
 
-/// The title check of check_vault.js: `^("([^"\\]|\\.)*"|'[^']*')$`. This is a
-/// quoted scalar that YAML accepts.
-fn is_well_formed_quoted(value: &str) -> bool {
-    let mut chars = value.chars();
-    match chars.next() {
-        Some('"') => loop {
-            match chars.next() {
-                None => return false,
-                // A backslash escapes the next character, a quote included.
-                Some('\\') => {
-                    if chars.next().is_none() {
-                        return false;
-                    }
-                }
-                Some('"') => return chars.next().is_none(),
-                Some(_) => {}
+/// The body of a `"`-delimited scalar that spans the whole of `value`, or
+/// `None` if `value` is not exactly one (no trailing garbage, no missing
+/// close). A `\` escapes exactly the next character, a quote included, so
+/// that scanning for the close never stops on an escaped `"`. This says
+/// nothing about which escapes `resolve_escape` below can actually resolve.
+fn double_quoted_body(value: &str) -> Option<&str> {
+    let rest = value.strip_prefix('"')?;
+    let mut chars = rest.char_indices();
+    loop {
+        match chars.next()? {
+            (_, '\\') => {
+                chars.next()?;
             }
-        },
-        Some('\'') => {
-            let rest: Vec<char> = chars.collect();
-            matches!(rest.split_last(), Some(('\'', body)) if !body.contains(&'\''))
+            (i, '"') => return if chars.next().is_none() { Some(&rest[..i]) } else { None },
+            _ => {}
         }
-        _ => false,
     }
 }
 
-/// Same semantics as unquote() in server.js: a well-formed double-quoted
-/// scalar is stripped and its `\x` escapes resolved; a well-formed
-/// single-quoted scalar (no embedded `'`) is stripped as-is; anything else,
-/// malformed quoting included, is returned unchanged.
-fn unquote(value: &str) -> String {
-    if !is_well_formed_quoted(value) {
-        return value.to_string();
+/// The body of a `'`-delimited scalar that spans the whole of `value`: no
+/// escaping, and no embedded `'` (there is no way to escape one).
+fn single_quoted_body(value: &str) -> Option<&str> {
+    let body = value.strip_prefix('\'')?.strip_suffix('\'')?;
+    (!body.contains('\'')).then_some(body)
+}
+
+/// Resolve one escape in a double-quoted body, at the position right after
+/// the `\`. This table is shared with `quote_yaml`, `server.js`'s
+/// `unquote`/`quoteYaml` and `check_vault.js`. Returns the resolved
+/// character and how many characters after the `\` belong to the escape (1,
+/// or 5 for `\uXXXX`, or 3 for `\xXX`), or `None` if `rest` does not start
+/// with a recognized escape: an unknown letter, a `\u`/`\x` with too few or
+/// non-hex digits, or a code point `char::from_u32` refuses (e.g. a lone
+/// surrogate half).
+fn resolve_escape(rest: &[char]) -> Option<(char, usize)> {
+    // to_digit(16) refuses every character that is not a hex digit. It also
+    // refuses the sign that from_str_radix accepts. Four digits give 0xFFFF at
+    // most, thus the value cannot overflow.
+    let hex = |digits: &[char]| digits.iter().try_fold(0u32, |n, c| Some(n * 16 + c.to_digit(16)?));
+    match *rest.first()? {
+        '\\' => Some(('\\', 1)),
+        '"' => Some(('"', 1)),
+        '/' => Some(('/', 1)),
+        'n' => Some(('\n', 1)),
+        't' => Some(('\t', 1)),
+        'r' => Some(('\r', 1)),
+        '0' => Some(('\0', 1)),
+        'u' if rest.len() >= 5 => hex(&rest[1..5]).and_then(char::from_u32).map(|c| (c, 5)),
+        'x' if rest.len() >= 3 => hex(&rest[1..3]).and_then(char::from_u32).map(|c| (c, 3)),
+        _ => None,
     }
-    let body = &value[1..value.len() - 1];
-    if !value.starts_with('"') {
-        return body.to_string();
+}
+
+/// The title check of check_vault.js: a single-quoted scalar with no embedded
+/// `'`, or a double-quoted scalar whose every `\` starts an escape from the
+/// `resolve_escape` table. An unknown escape (`\q`) makes the whole value
+/// malformed, even though `unquote` below still strips such a value's quotes.
+fn is_well_formed_quoted(value: &str) -> bool {
+    match double_quoted_body(value) {
+        Some(body) => resolve_body(body).1,
+        None => single_quoted_body(value).is_some(),
     }
+}
+
+/// Walk the body of a double-quoted scalar: the resolved text, and whether
+/// every `\` in it started an escape `resolve_escape` knows. An unknown escape
+/// is kept exactly as written, backslash included, so the text never loses a
+/// character this table does not understand; the flag is what rejects it.
+/// One walk for both readings, so the two can never disagree on what an
+/// unknown escape means.
+fn resolve_body(body: &str) -> (String, bool) {
+    let chars: Vec<char> = body.chars().collect();
     let mut out = String::with_capacity(body.len());
-    let mut chars = body.chars();
-    while let Some(c) = chars.next() {
-        // is_well_formed_quoted guarantees a `\` is always followed by
-        // another character, so `chars.next()` here is never None.
-        out.push(if c == '\\' { chars.next().unwrap() } else { c });
+    let mut well_formed = true;
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '\\' {
+            match resolve_escape(&chars[i + 1..]) {
+                Some((resolved, len)) => {
+                    out.push(resolved);
+                    i += 1 + len;
+                }
+                None => {
+                    out.push('\\');
+                    well_formed = false;
+                    i += 1;
+                }
+            }
+        } else {
+            out.push(chars[i]);
+            i += 1;
+        }
     }
-    out
+    (out, well_formed)
+}
+
+/// Same semantics as unquote() in server.js: a `"`- or `'`-delimited scalar
+/// that spans the whole value has its quotes stripped; a double-quoted one
+/// also has its escapes resolved via the `resolve_escape` table. An unknown
+/// escape is left exactly as written, backslash included, so this function
+/// never invents or drops a character it does not understand — rejecting it
+/// is `check_vault.js`'s / `is_well_formed_quoted`'s job. Anything that is
+/// not a `"`- or `'`-delimited scalar spanning the whole value (malformed
+/// quoting included) is returned unchanged.
+fn unquote(value: &str) -> String {
+    match double_quoted_body(value) {
+        Some(body) => resolve_body(body).0,
+        None => single_quoted_body(value).map_or_else(|| value.to_string(), str::to_string),
+    }
 }
 
 fn unlink(value: &str) -> String {
@@ -765,6 +839,21 @@ fn unlink(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_fence_takes_spaces_and_tabs_after_the_dashes_but_no_other_blank() {
+        // server.js and check_vault.js allow `[ \t]*` there and nothing else.
+        // Reading a wider set here would make a file that the web front end
+        // calls "missing frontmatter" load fine in the TUI.
+        let padded = split_lines("---\nid: T-0001\n--- \t\n\n## Summary\n");
+        assert_eq!(frontmatter_end(&padded), Ok(2));
+
+        let nbsp = split_lines("---\nid: T-0001\n---\u{a0}\n\n## Summary\n");
+        assert!(frontmatter_end(&nbsp).is_err(), "a no-break space must not close the fence");
+
+        let opening_nbsp = split_lines("---\u{a0}\nid: T-0001\n---\n\n## Summary\n");
+        assert!(frontmatter_end(&opening_nbsp).is_err(), "nor open it");
+    }
 
     /// Read-only source of the fixture vault, checked into the repo. The tests
     /// never write to it.
@@ -1015,6 +1104,30 @@ mod tests {
         assert_eq!(changed.len(), 2, "only status and closed may change");
     }
 
+    #[test]
+    fn split_lines_round_trips_pure_eol_files() {
+        let lf = sample();
+        assert_eq!(split_lines(&lf).join(detect_eol(&lf)), lf, "pure LF must round-trip");
+
+        let crlf = lf.replace('\n', "\r\n");
+        assert_eq!(split_lines(&crlf).join(detect_eol(&crlf)), crlf, "pure CRLF must round-trip");
+    }
+
+    #[test]
+    fn a_stray_crlf_in_an_lf_ticket_still_parses() {
+        // Everything is LF, like every fixture, except one body line that an
+        // editor touched and left with a CRLF ending. detect_eol must not be
+        // changed (server.js's detectEOL matches this rule), so split_lines
+        // is the one that has to tolerate this instead of splitting the
+        // whole file on that single "\r\n" and losing the frontmatter.
+        let text = sample().replacen("Sample.\n", "Sample.\r\n", 1);
+
+        let ticket = Ticket::parse(Path::new(SAMPLE_NAME), &text).expect("must still parse");
+
+        assert_eq!(ticket.id, "T-0042");
+        assert_eq!(ticket.status, "open");
+    }
+
     // --- editing ---
 
     const SAMPLE_NAME: &str = "T-0042-sample.md";
@@ -1076,6 +1189,22 @@ mod tests {
         for title in ["plain", "say \"hi\"", "c:\\dir", "a \" b \\ c", "He said \\\"hi\\\""] {
             assert_eq!(unquote(&quote_yaml(title)), title);
         }
+    }
+
+    #[test]
+    fn unquote_resolves_the_full_escape_table() {
+        assert_eq!(unquote("\"Smile \\u263A\""), "Smile \u{263A}");
+        assert_eq!(unquote("\"a\\\\b\""), "a\\b");
+        assert_eq!(unquote("\"tab\\there\""), "tab\there");
+        // Unknown escape: the value passes through with its backslash kept,
+        // it is not dropped, not partially resolved.
+        assert_eq!(unquote("\"bad\\q\""), "bad\\q");
+    }
+
+    #[test]
+    fn is_well_formed_quoted_rejects_unknown_escapes_only() {
+        assert!(!is_well_formed_quoted("\"bad\\q\""));
+        assert!(is_well_formed_quoted("\"Smile \\u263A\""));
     }
 
     #[test]
@@ -1268,6 +1397,21 @@ mod tests {
         assert!(!project_exists(&vault, "theme-note"), "one level below a project folder");
         assert!(!project_exists(&vault, "no-note-folder"), "folder with no matching note");
         assert!(!project_exists(&vault, "../../../etc/passwd"));
+    }
+
+    #[test]
+    fn folder_note_that_is_itself_a_directory_is_not_a_project() {
+        // Regression test: `path.join(format!("{name}.md")).is_file()` in
+        // list_projects already handles this. A folder note is normally a
+        // file, `projects/<name>/<name>.md`; this makes it a directory
+        // instead, as some other tool might by mistake.
+        let root = std::env::temp_dir().join("tui-vault-test-folder-note-dir");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("projects/bogus/bogus.md")).unwrap();
+
+        assert!(!project_exists(&root, "bogus"), "a directory named <name>.md is not the note");
+
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
