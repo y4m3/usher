@@ -2939,14 +2939,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "61c41af27dd6d1e27b1b16b489db798443478cef1f06a660c96db617ba5de3b1"
 
 [[package]]
-name = "task-app-desktop"
-version = "0.1.0"
-dependencies = [
- "tauri",
- "tauri-build",
-]
-
-[[package]]
 name = "tauri"
 version = "2.11.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3590,6 +3582,14 @@ dependencies = [
  "serde",
  "unic-ucd-ident",
  "url",
+]
+
+[[package]]
+name = "usher-desktop"
+version = "0.1.0"
+dependencies = [
+ "tauri",
+ "tauri-build",
 ]
 
 [[package]]
