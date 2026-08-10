@@ -159,6 +159,7 @@ cd tui && cargo test   # TUI: Windows native or WSL
 - No authentication, no HTTPS. The server binds to `127.0.0.1` only.
 - `archived` tickets do not show on the board. The API still returns them.
 - No file watch. The UI refreshes on focus and each 30 seconds.
+- A release build of the desktop shell has no console, so a startup failure (the port already taken, `server.js` exiting early) prints where nobody sees it. Start it from a terminal to read the reason.
 
 ## License
 
