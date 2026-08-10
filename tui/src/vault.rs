@@ -712,13 +712,26 @@ fn is_well_formed_quoted(value: &str) -> bool {
     }
 }
 
+/// Same semantics as unquote() in server.js: a well-formed double-quoted
+/// scalar is stripped and its `\x` escapes resolved; a well-formed
+/// single-quoted scalar (no embedded `'`) is stripped as-is; anything else,
+/// malformed quoting included, is returned unchanged.
 fn unquote(value: &str) -> String {
-    for q in ['"', '\''] {
-        if value.len() >= 2 && value.starts_with(q) && value.ends_with(q) {
-            return value[1..value.len() - 1].to_string();
-        }
+    if !is_well_formed_quoted(value) {
+        return value.to_string();
     }
-    value.to_string()
+    let body = &value[1..value.len() - 1];
+    if !value.starts_with('"') {
+        return body.to_string();
+    }
+    let mut out = String::with_capacity(body.len());
+    let mut chars = body.chars();
+    while let Some(c) = chars.next() {
+        // is_well_formed_quoted guarantees a `\` is always followed by
+        // another character, so `chars.next()` here is never None.
+        out.push(if c == '\\' { chars.next().unwrap() } else { c });
+    }
+    out
 }
 
 fn unlink(value: &str) -> String {
@@ -984,6 +997,41 @@ mod tests {
         assert_eq!(quote_yaml("c:\\dir"), "\"c:\\\\dir\"");
         // The output of quote_yaml must pass the title check of the lint.
         assert!(is_well_formed_quoted(&quote_yaml("a \" b \\ c")));
+    }
+
+    #[test]
+    fn unquote_resolves_escapes_like_server_js() {
+        assert_eq!(unquote("\"He said \\\"hi\\\"\""), "He said \"hi\"");
+        assert_eq!(unquote("\"c:\\\\dir\""), "c:\\dir");
+        // Single-quoted: stripped as-is, no escaping.
+        assert_eq!(unquote("'plain'"), "plain");
+        // Malformed quoting: left completely unchanged, not partially stripped.
+        assert_eq!(unquote("\"unbalanced"), "\"unbalanced");
+    }
+
+    #[test]
+    fn quote_yaml_and_unquote_round_trip() {
+        for title in ["plain", "say \"hi\"", "c:\\dir", "a \" b \\ c", "He said \\\"hi\\\""] {
+            assert_eq!(unquote(&quote_yaml(title)), title);
+        }
+    }
+
+    #[test]
+    fn set_field_title_escapes_do_not_grow_on_repeated_writes() {
+        let root = temp_vault("field-title-escape-stable");
+        let path = root.join("tickets/T-0001-bootstrap-vault.md");
+
+        set_field(&root, &path, "title", "He said \"hi\"").unwrap();
+        let once = fs::read_to_string(&path).unwrap();
+
+        // Parse the stored title back, then write it unchanged. If unquote
+        // failed to resolve the escapes, quote_yaml would double the
+        // backslashes on this second write.
+        let ticket = Ticket::parse(&path, &once).unwrap();
+        set_field(&root, &path, "title", &ticket.title).unwrap();
+        let twice = fs::read_to_string(&path).unwrap();
+
+        assert_eq!(once, twice, "backslashes must not grow on a round trip");
     }
 
     #[test]
