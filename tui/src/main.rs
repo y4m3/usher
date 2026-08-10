@@ -95,9 +95,19 @@ impl App {
     fn reload(&mut self) {
         self.last_reload = Instant::now();
         match vault::load_tickets(&self.vault) {
-            Ok(tickets) => {
+            Ok((tickets, warnings)) => {
                 self.tickets = tickets;
                 self.rebuild();
+                // Only when the operation that led here has nothing to say.
+                // Every write reloads afterwards, and this warning is about
+                // some other file: it must not replace the reason the edit the
+                // user just asked for failed. on_key clears the message at the
+                // start of each keypress, so this still shows on a plain view.
+                if let Some(first) = warnings.first()
+                    && self.message.is_none()
+                {
+                    self.message = Some(format!("skipped {} unparsable file(s): {first}", warnings.len()));
+                }
             }
             Err(e) => self.message = Some(e),
         }
@@ -620,6 +630,24 @@ mod tests {
 
     fn ids(column: &[Ticket]) -> Vec<&str> {
         column.iter().map(|t| t.id.as_str()).collect()
+    }
+
+    #[test]
+    fn a_reload_warning_does_not_replace_the_message_of_a_failed_edit() {
+        let root = std::env::temp_dir().join("tui-main-test-reload-message");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("tickets")).unwrap();
+        std::fs::write(root.join("tickets").join("junk.md"), "not a ticket at all").unwrap();
+
+        let mut app = App::new(root.clone());
+        app.reload();
+        assert!(app.message.is_some(), "control: with nothing to say, the warning shows");
+
+        app.message = Some("bad due date".to_string());
+        app.reload();
+        assert_eq!(app.message.as_deref(), Some("bad due date"));
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

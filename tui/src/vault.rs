@@ -35,7 +35,10 @@ pub struct Ticket {
 impl Ticket {
     fn parse(path: &Path, text: &str) -> Result<Self, String> {
         let lines = split_lines(text);
-        let end = frontmatter_end(&lines)?;
+        // Every other error branch of this function names the file. Do the
+        // same here, so a warning collected across many files (load_tickets)
+        // says which one is a plain note with no frontmatter at all.
+        let end = frontmatter_end(&lines).map_err(|e| format!("{}: {e}", path.display()))?;
         let get = |key: &str| fm_get(&lines[1..end], key).unwrap_or_default();
 
         let status = unquote(&get("status"));
@@ -65,19 +68,33 @@ impl Ticket {
     }
 }
 
-/// Load every `<vault>/tickets/*.md` note, sorted by id.
-pub fn load_tickets(vault: &Path) -> Result<Vec<Ticket>, String> {
+/// Load every `<vault>/tickets/*.md` note, sorted by id. A file that fails to
+/// read or to parse does not stop the load: it is skipped, and its message
+/// (which names the file) goes into the second return value. Only a failure
+/// to read the `tickets/` directory itself is an `Err`.
+pub fn load_tickets(vault: &Path) -> Result<(Vec<Ticket>, Vec<String>), String> {
     let dir = vault.join("tickets");
     let entries = fs::read_dir(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let mut tickets = Vec::new();
+    let mut warnings = Vec::new();
     for entry in entries {
-        let path = entry.map_err(|e| e.to_string())?.path();
-        if path.extension().is_some_and(|e| e == "md") {
-            tickets.push(Ticket::parse(&path, &read(&path)?)?);
+        let path = match entry {
+            Ok(e) => e.path(),
+            Err(e) => {
+                warnings.push(e.to_string());
+                continue;
+            }
+        };
+        if !path.extension().is_some_and(|e| e == "md") {
+            continue;
+        }
+        match read(&path).and_then(|text| Ticket::parse(&path, &text)) {
+            Ok(ticket) => tickets.push(ticket),
+            Err(e) => warnings.push(e),
         }
     }
     tickets.sort_by(|a, b| a.id.cmp(&b.id));
-    Ok(tickets)
+    Ok((tickets, warnings))
 }
 
 /// Move a ticket to `new_status` and apply the transition rules of the vault.
@@ -823,7 +840,9 @@ mod tests {
     #[test]
     fn every_vault_ticket_parses() {
         let root = temp_vault("parse");
-        let tickets = load_tickets(&root).expect("all tickets must parse");
+        // No warnings: every fixture file is a well-formed ticket.
+        let (tickets, warnings) = load_tickets(&root).expect("all tickets must parse");
+        assert!(warnings.is_empty(), "{warnings:?}");
         assert!(!tickets.is_empty());
         for t in &tickets {
             assert!(t.id.starts_with("T-"), "bad id {}", t.id);
@@ -836,11 +855,24 @@ mod tests {
     #[test]
     fn block_list_tags_and_closed_parse() {
         let root = temp_vault("tags");
-        let tickets = load_tickets(&root).unwrap();
+        let (tickets, _) = load_tickets(&root).unwrap();
         let by_id = |id: &str| tickets.iter().find(|t| t.id == id).unwrap();
         assert_eq!(by_id("T-0001").tags, ["setup"]);
         assert_eq!(by_id("T-0001").closed, "");
         assert_eq!(by_id("T-0006").closed, "2026-08-09");
+    }
+
+    #[test]
+    fn one_unparsable_ticket_does_not_block_the_others() {
+        let root = temp_vault("broken-ticket");
+        fs::write(root.join("tickets/junk.md"), "not a ticket at all").unwrap();
+
+        let (tickets, warnings) = load_tickets(&root).expect("a bad file must not fail the load");
+
+        assert!(!tickets.is_empty(), "the other tickets must still load");
+        assert!(tickets.iter().all(|t| t.id.starts_with("T-")));
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("junk.md"), "{warnings:?}");
     }
 
     #[test]
