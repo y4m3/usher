@@ -137,6 +137,42 @@ async function runTests(fakeVault, checkVault) {
     assert(after === before, "same-status POST: file byte-identical");
   }
 
+  // Leaving done for anything but archived clears closed. The lint only
+  // checks "done but closed empty", never the reverse, so a stale closed date
+  // would otherwise survive a reopen.
+  {
+    const file = ticketFile(fakeVault, "T-0002"); // currently done, closed set above
+    const res = await fetch(BASE + "/api/tickets/T-0002/status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "open" }),
+    });
+    assert(res.ok, "done->open request succeeds");
+    const after = fs.readFileSync(file, "utf8");
+    assert(/^closed: $/m.test(after), "done->open: closed cleared");
+    assert(checkVault(fakeVault).length === 0, "done->open: vault still lints clean");
+  }
+
+  // done -> archived keeps closed: it is the record of when the work finished.
+  {
+    const file = ticketFile(fakeVault, "T-0002"); // currently open, closed empty
+    await fetch(BASE + "/api/tickets/T-0002/status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "done" }),
+    });
+    const today = localISODate(new Date());
+    const res = await fetch(BASE + "/api/tickets/T-0002/status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "archived" }),
+    });
+    assert(res.ok, "done->archived request succeeds");
+    const after = fs.readFileSync(file, "utf8");
+    assert(after.includes(`closed: ${today}`), "done->archived: closed kept");
+    assert(checkVault(fakeVault).length === 0, "done->archived: vault still lints clean");
+  }
+
   // POST /log adds exactly one line. It changes nothing else.
   {
     const file = ticketFile(fakeVault, "T-0001");

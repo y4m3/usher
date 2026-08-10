@@ -404,6 +404,9 @@ const server = http.createServer(async (req, res) => {
         writeTicket(file, (text) => {
           text = setFrontmatterField(text, "status", body.status);
           if (body.status === "done") text = setFrontmatterField(text, "closed", todayDate());
+          // Leaving done clears closed again, except to archived: that keeps
+          // the record of when the work finished.
+          else if (body.status !== "archived") text = setFrontmatterField(text, "closed", "");
           const msg = logMessageFor(body.status, body.note);
           return appendLog(text, `- ${nowStamp()} — ${msg}`);
         });

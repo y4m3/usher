@@ -98,9 +98,12 @@ pub fn change_status(path: &Path, new_status: &str, note: Option<&str>) -> Resul
     }
 
     fm_set(&mut lines[1..end], "status", new_status)?;
-    let closed = (new_status == "done").then(today);
-    if let Some(date) = &closed {
-        fm_set(&mut lines[1..end], "closed", date)?;
+    if new_status == "done" {
+        fm_set(&mut lines[1..end], "closed", &today())?;
+    } else if new_status != "archived" {
+        // Leaving done clears closed again, except to archived: that keeps
+        // the record of when the work finished.
+        fm_set(&mut lines[1..end], "closed", "")?;
     }
     append_log_line(&mut lines, &transition_note(new_status, note))?;
 
@@ -886,6 +889,33 @@ mod tests {
             vec![format!("closed: {}", today()), "status: done".to_string()]
         );
         assert!(inserted.ends_with(" \u{2014} done: shipped"), "{inserted}");
+    }
+
+    #[test]
+    fn leaving_done_clears_closed_but_archiving_keeps_it() {
+        let root = temp_vault("leave-done");
+        let path = root.join("tickets/T-0001-bootstrap-vault.md");
+
+        change_status(&path, "done", None).unwrap();
+        let done = Ticket::parse(&path, &fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(done.closed, today());
+
+        change_status(&path, "open", None).unwrap();
+        let reopened = Ticket::parse(&path, &fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(reopened.closed.is_empty(), "closed must clear when leaving done for open");
+    }
+
+    #[test]
+    fn archiving_a_done_ticket_keeps_closed() {
+        let root = temp_vault("archive-done");
+        let path = root.join("tickets/T-0001-bootstrap-vault.md");
+
+        change_status(&path, "done", None).unwrap();
+        let closed = Ticket::parse(&path, &fs::read_to_string(&path).unwrap()).unwrap().closed;
+
+        change_status(&path, "archived", None).unwrap();
+        let archived = Ticket::parse(&path, &fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(archived.closed, closed, "archiving a done ticket keeps closed");
     }
 
     #[test]

@@ -117,6 +117,7 @@ Rules:
 - **Frontmatter fields**, always present, in this order: `id`, `title`, `status`, `priority`, `project`, `repos`, `tags`, `created`, `due`, `closed`, `branch`.
 - An empty scalar value keeps one space after the colon (`due: `). usher keeps that byte.
 - **`status`** is one of: `open`, `doing`, `review`, `done`, `archived`. The board shows the first four.
+- **`closed`** dates the day the work finished. A move to `done` sets it. A move to anything but `done` or `archived` clears it, so the date never outlives the work it describes; `archived` is the exception, so a finished ticket keeps its date when it is filed away.
 - **`priority`** is one of: `urgent`, `high`, `normal`, `low`.
 - **Body sections**, in this order: `## Summary`, `## Notes`, `## Log`.
 - usher edits Summary and Notes. Log is append-only, one line for each entry: `- YYYY-MM-DD HH:mm — message`.
@@ -158,7 +159,6 @@ cd tui && cargo test   # TUI: Windows native or WSL
 - No authentication, no HTTPS. The server binds to `127.0.0.1` only.
 - `archived` tickets do not show on the board. The API still returns them.
 - No file watch. The UI refreshes on focus and each 30 seconds.
-- A move out of `done` does not clear `closed:`. The vault's status flow has no reopen step.
 
 ## License
 
