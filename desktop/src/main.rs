@@ -36,16 +36,34 @@ fn main() {
 
     let mut command = Command::new("node");
     command.arg("server.js").current_dir(repo_root);
+    // Hand our own vault argument to the child, so the desktop shell resolves
+    // the vault in the same order as the other two front ends. The child runs
+    // with repo_root as its working directory, so a relative path has to be
+    // made absolute here -- otherwise it would resolve against the repository
+    // rather than the directory the user typed the command in.
+    if let Some(vault) = std::env::args_os().nth(1) {
+        match std::env::current_dir() {
+            Ok(cwd) => command.arg(cwd.join(vault)),
+            Err(_) => command.arg(vault),
+        };
+    }
     #[cfg(windows)]
     command.creation_flags(CREATE_NO_WINDOW);
 
-    let child: Child = command
+    let mut child: Child = command
         .spawn()
         .expect("failed to spawn `node server.js` -- is Node.js on PATH?");
 
     // ponytail: a fixed poll of 5 seconds with a 100 ms step. There is no
     // setting for it. Make the values larger if a slow machine needs more time.
-    wait_for_port(3000, Duration::from_secs(5));
+    if !wait_for_port(3000, Duration::from_secs(5)) {
+        let _ = child.kill();
+        eprintln!(
+            "usher: server.js did not open port 3000 within 5s -- it likely exited early.\n\
+             Check that the vault exists (default: ../obsidian, or set USHER_VAULT)."
+        );
+        std::process::exit(1);
+    }
 
     let mut child = Some(child);
 

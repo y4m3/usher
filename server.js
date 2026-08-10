@@ -1,12 +1,17 @@
 // Minimal HTTP server for usher, a kanban board over the Obsidian Ticket Vault.
 // It has no dependencies.
 // Usage: node server.js [vault-root]   (default vault-root: ../obsidian)
+// Vault resolution order: CLI argument, then USHER_VAULT, then the default.
+// Same order as the TUI (see tui/README.md).
 "use strict";
 const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const vaultRoot = path.resolve(__dirname, process.argv[2] || "../obsidian");
+const vaultRoot = path.resolve(
+  __dirname,
+  process.argv[2] || process.env.USHER_VAULT || "../obsidian",
+);
 const ticketsDir = path.join(vaultRoot, "tickets");
 const projectsDir = path.join(vaultRoot, "projects");
 const checkVault = require(path.join(vaultRoot, "system/scripts/check_vault.js"));
