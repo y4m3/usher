@@ -755,6 +755,48 @@ async function runTests(fakeVault, checkVault) {
     assert(!list.includes("ghost"), `GET /api/projects excludes a folder note that is itself a directory (got ${JSON.stringify(list)})`);
   }
 
+  // writeTicket's rollback has two branches: restore original content for an
+  // existing file (covered below), and unlink for a file that did not exist
+  // before the write — only exercised by ticket *creation*. Trip checkVault
+  // via the same EISDIR trick, but nested one level down so checkVault's
+  // recursive scan finds it while nextTicketId's plain, non-recursive
+  // tickets/ scan does not — nextTicketId must succeed so the run actually
+  // reaches writeTicket.
+  {
+    const trapDir = path.join(fakeVault, "tickets", "trap-subdir", "trap.md");
+    fs.mkdirSync(trapDir, { recursive: true });
+    const before = currentMaxId(fakeVault);
+    const expectedId = "T-" + String(before + 1).padStart(4, "0");
+    const expectedFile = path.join(fakeVault, "tickets", `${expectedId}-rollback-check.md`);
+    const res = await fetch(BASE + "/api/tickets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "rollback-check" }),
+    });
+    assert(res.status === 500, `create: checkVault exception surfaces as 500 (got ${res.status})`);
+    fs.rmSync(path.join(fakeVault, "tickets", "trap-subdir"), { recursive: true, force: true });
+    assert(!fs.existsSync(expectedFile), "create: writeTicket deletes the half-written file when checkVault() throws");
+    assert(checkVault(fakeVault).length === 0, "create rollback: vault lints clean again once the trap is removed");
+  }
+
+  // If checkVault() throws instead of returning problems (e.g. a stray
+  // directory under tickets/ that looks like a ticket file), writeTicket must
+  // still restore the original content before the error propagates. This is
+  // the last test: it leaves fakeVault permanently broken for checkVault, on
+  // purpose, by design of the reproduction below.
+  {
+    fs.mkdirSync(path.join(fakeVault, "tickets", "broken.md")); // makes checkVault's readFileSync EISDIR
+    const file = ticketFile(fakeVault, "T-0001");
+    const before = fs.readFileSync(file, "utf8");
+    const res = await fetch(BASE + "/api/tickets/T-0001/log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "should be rolled back" }),
+    });
+    assert(res.status === 500, `writeTicket surfaces the checkVault exception (got ${res.status})`);
+    const after = fs.readFileSync(file, "utf8");
+    assert(after === before, "writeTicket restores the original file when checkVault() throws");
+  }
 }
 
 async function main() {
