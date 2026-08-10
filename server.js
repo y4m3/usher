@@ -334,11 +334,29 @@ function writeTicket(filePath, mutate) {
   const original = exists ? fs.readFileSync(filePath, "utf8") : null;
   const updated = mutate(original);
   fs.writeFileSync(filePath, updated, "utf8");
-  const problems = checkVault(vaultRoot);
+  // A failed rollback must not hide whatever made us roll back, and it must not
+  // pass in silence either: the rejected edit is then still on disk, and this
+  // is the only place that can say so. Returns the trouble, or null.
+  const rollback = () => {
+    try {
+      if (exists) fs.writeFileSync(filePath, original, "utf8");
+      else fs.unlinkSync(filePath);
+      return null;
+    } catch (e) {
+      return `could not ${exists ? "restore" : "remove"} ${filePath} (${e.message}); the rejected write is still on disk`;
+    }
+  };
+  let problems;
+  try {
+    problems = checkVault(vaultRoot);
+  } catch (e) {
+    const stuck = rollback();
+    if (stuck) e.message = `${e.message} -- ${stuck}`;
+    throw e;
+  }
   if (problems.length) {
-    if (exists) fs.writeFileSync(filePath, original, "utf8");
-    else fs.unlinkSync(filePath);
-    const err = new Error("lint failed");
+    const stuck = rollback();
+    const err = new Error(stuck ? `lint failed -- ${stuck}` : "lint failed");
     err.problems = problems;
     throw err;
   }
