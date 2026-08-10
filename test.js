@@ -216,6 +216,20 @@ async function runTests(fakeVault, checkVault) {
     assert(checkVault(fakeVault).length === 0, "fields: vault still lints clean");
   }
 
+  // fields: a title with `$&` must not trigger String.replace's special
+  // replacement patterns, which would splice the old line into the new one.
+  {
+    const res = await fetch(BASE + "/api/tickets/T-0004/fields", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "cost is $& real" }),
+    });
+    assert(res.ok, "fields: title with $& update succeeds");
+    const content = await fetch(BASE + "/api/tickets/T-0004").then((r) => r.text());
+    assert(content.includes('title: "cost is $& real"'), `fields: $& stored literally (got ${JSON.stringify(content.match(/^title:.*$/m)?.[0])})`);
+    assert(checkVault(fakeVault).length === 0, "fields: vault still lints clean ($& title)");
+  }
+
   // fields: a cleared due date uses the empty-field style of the vault again.
   {
     const file = ticketFile(fakeVault, "T-0001"); // the due date is 2026-08-14

@@ -135,7 +135,9 @@ function setFrontmatterField(text, key, value) {
   const block = m[0];
   const re = new RegExp(`^${key}:[^\\r\\n]*`, "m");
   if (!re.test(block)) throw new Error(`missing ${key} field`);
-  const newBlock = block.replace(re, `${key}: ${value}`);
+  // A function replacement, so a `$&`/`$1`/etc. in value is never read as a
+  // regex replacement pattern.
+  const newBlock = block.replace(re, () => `${key}: ${value}`);
   return text.slice(0, m.index) + newBlock + text.slice(m.index + block.length);
 }
 
