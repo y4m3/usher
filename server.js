@@ -197,9 +197,13 @@ function setTagsBlock(text, tags) {
   const fm = text.match(FRONTMATTER_RE);
   if (!fm) throw new Error("missing frontmatter");
   const block = text.slice(0, fm.index + fm[0].length);
-  const m = block.match(/^tags:[^\r\n]*\r?\n(?:[ \t]+-[^\r\n]*\r?\n)*/m);
+  // The capture is the ending of the `tags:` line this block replaces, not the
+  // ending of the file: in a file with mixed endings those differ, and the TUI
+  // (line_cr) takes it from the line. Taking it from the file would have the
+  // two engines write different bytes for the same edit.
+  const m = block.match(/^tags:[^\r\n]*(\r?\n)(?:[ \t]+-[^\r\n]*\r?\n)*/m);
   if (!m) throw new Error("missing tags field");
-  const eol = detectEOL(text);
+  const eol = m[1];
   const newBlock = tags.length ? `tags:${eol}${tags.map((t) => `  - ${t}${eol}`).join("")}` : `tags: []${eol}`;
   return text.slice(0, m.index) + newBlock + text.slice(m.index + m[0].length);
 }
