@@ -97,12 +97,27 @@ function parseTags(text) {
   return tags;
 }
 
+// One file that cannot be read, or that carries no frontmatter, does not take
+// the board down with it: it is left out and named on the server's console.
+// The TUI does the same (load_tickets returns its warnings). Without this a
+// plain note dropped into tickets/ became a ticket with every field empty, and
+// a directory called something.md made this whole call fail with EISDIR.
 function listTickets() {
   const names = fs.readdirSync(ticketsDir).filter((n) => n.endsWith(".md"));
-  return names.map((name) => {
-    const text = fs.readFileSync(path.join(ticketsDir, name), "utf8");
-    const fm = parseFrontmatter(text) || {};
-    return {
+  return names.flatMap((name) => {
+    let text;
+    try {
+      text = fs.readFileSync(path.join(ticketsDir, name), "utf8");
+    } catch (e) {
+      console.warn(`skipped tickets/${name}: ${e.message}`);
+      return [];
+    }
+    const fm = parseFrontmatter(text);
+    if (!fm) {
+      console.warn(`skipped tickets/${name}: missing frontmatter`);
+      return [];
+    }
+    return [{
       id: unquote(fm.id),
       title: unquote(fm.title),
       status: unquote(fm.status),
@@ -112,7 +127,7 @@ function listTickets() {
       project: unwikilink(unquote(fm.project)),
       tags: parseTags(text),
       file: "tickets/" + name,
-    };
+    }];
   });
 }
 
