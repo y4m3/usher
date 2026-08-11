@@ -792,6 +792,18 @@ async function runTests(fakeVault, checkVault) {
     assert(!list.includes("ghost"), `GET /api/projects excludes a folder note that is itself a directory (got ${JSON.stringify(list)})`);
   }
 
+  // A file in tickets/ that is not a ticket is left off the board, rather than
+  // becoming a row with every field empty. Removed again at once: checkVault
+  // calls the vault broken while it is there, so every write would fail.
+  {
+    const junk = path.join(fakeVault, "tickets", "zz-not-a-ticket.md");
+    fs.writeFileSync(junk, "just a note, no frontmatter\n", "utf8");
+    const list = await fetch(BASE + "/api/tickets").then((r) => r.json());
+    fs.rmSync(junk);
+    assert(!list.some((t) => t.file.endsWith("zz-not-a-ticket.md")), "a note without frontmatter is left off the board");
+    assert(list.every((t) => t.id), "no board row has an empty id");
+  }
+
   // writeTicket's rollback has two branches: restore original content for an
   // existing file (covered below), and unlink for a file that did not exist
   // before the write — only exercised by ticket *creation*. Trip checkVault
@@ -833,6 +845,17 @@ async function runTests(fakeVault, checkVault) {
     assert(res.status === 500, `writeTicket surfaces the checkVault exception (got ${res.status})`);
     const after = fs.readFileSync(file, "utf8");
     assert(after === before, "writeTicket restores the original file when checkVault() throws");
+    // The same directory used to take the whole board down with EISDIR. Reading
+    // is not writing: one unreadable entry is skipped, the rest still load.
+    const res2 = await fetch(BASE + "/api/tickets");
+    const list = res2.ok ? await res2.json() : [];
+    assert(res2.status === 200, `GET /api/tickets survives a directory named *.md (got ${res2.status})`);
+    // Every real file, and only those: earlier tests add tickets, so count them
+    // rather than hard-coding a number.
+    const files = fs
+      .readdirSync(path.join(fakeVault, "tickets"), { withFileTypes: true })
+      .filter((e) => e.isFile() && e.name.endsWith(".md")).length;
+    assert(list.length === files, `and still returns every real ticket (got ${list.length} of ${files})`);
   }
 }
 
