@@ -792,6 +792,26 @@ async function runTests(fakeVault, checkVault) {
     assert(!list.includes("ghost"), `GET /api/projects excludes a folder note that is itself a directory (got ${JSON.stringify(list)})`);
   }
 
+  // An append may not rewrite the entry above the one it adds. The trailing
+  // spaces of the last log line belong to that line; the TUI leaves them there.
+  {
+    const file = ticketFile(fakeVault, "T-0004");
+    const lines = fs.readFileSync(file, "utf8").split("\n");
+    const idx = lines.map((l) => l.startsWith("- 20")).lastIndexOf(true);
+    lines[idx] += "  ";
+    const marked = lines[idx];
+    fs.writeFileSync(file, lines.join("\n"), "utf8");
+    const res = await fetch(BASE + "/api/tickets/T-0004/log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "the entry above keeps its spaces" }),
+    });
+    assert(res.ok, "log append onto an entry with trailing spaces succeeds");
+    const after = fs.readFileSync(file, "utf8");
+    assert(after.includes(marked + "\n"), "the entry above the new one keeps its trailing spaces");
+    assert(!/keeps its spaces {2}/.test(after), "and the new entry does not inherit them");
+  }
+
   // A file in tickets/ that is not a ticket is left off the board, rather than
   // becoming a row with every field empty. Removed again at once: checkVault
   // calls the vault broken while it is there, so every write would fail.
