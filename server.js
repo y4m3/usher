@@ -222,8 +222,12 @@ function sectionBounds(text, header) {
 function appendLog(text, line) {
   const { start, end } = sectionBounds(text, "Log");
   const section = text.slice(start, end);
-  const trimmed = section.replace(/\s+$/, "");
-  const trailingWS = section.slice(trimmed.length);
+  // Whole blank lines only, not `\s+$`: that also ate the trailing spaces of
+  // the last entry and put them back after the new one, rewriting a line this
+  // append must not touch. The TUI walks back over blank lines and leaves the
+  // entry above them alone; this is the same rule.
+  const trailingWS = /(?:\r?\n[ \t]*)*$/.exec(section)[0];
+  const trimmed = section.slice(0, section.length - trailingWS.length);
   const eol = detectEOL(text);
   const newSection = trimmed + eol + line + trailingWS;
   const out = text.slice(0, start) + newSection + text.slice(end);
