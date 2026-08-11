@@ -186,11 +186,16 @@ function setFrontmatterField(text, key, value) {
   const m = text.match(FRONTMATTER_RE);
   if (!m) throw new Error("missing frontmatter");
   const block = m[0];
-  const re = new RegExp(`^${key}:[^\\r\\n]*`, "m");
+  // `(^|\r?\n)` and not the `m` flag. The `^` of a multiline regex also starts
+  // a line after U+2028, U+2029 and a lone `\r`. No reader splits a file on
+  // those characters: this file, check_vault.js and the TUI all split on
+  // `\r?\n`. With the `m` flag the writer edits a "line" that no reader saw,
+  // the real field line keeps its value, and the write reports success.
+  const re = new RegExp(`(^|\\r?\\n)${key}:[^\\r\\n]*`);
   if (!re.test(block)) throw new Error(`missing ${key} field`);
   // The replacement is a function. Thus a `$&` or a `$1` in the value stays
   // literal text. A string replacement reads such text as a pattern.
-  const newBlock = block.replace(re, () => `${key}: ${value}`);
+  const newBlock = block.replace(re, (_full, lead) => `${lead}${key}: ${value}`);
   return text.slice(0, m.index) + newBlock + text.slice(m.index + block.length);
 }
 
@@ -207,23 +212,29 @@ function setTagsBlock(text, tags) {
   // also reads the line ending from the line. If this function reads the line
   // ending from the file, the two engines write different bytes for the same
   // edit.
-  const m = block.match(/^tags:[^\r\n]*(\r?\n)(?:[ \t]+-[^\r\n]*\r?\n)*/m);
+  // The first group is the line ending before `tags:`, for the reason that
+  // setFrontmatterField gives. The match starts at that ending, so the new
+  // block goes after it.
+  const m = block.match(/(^|\r?\n)tags:[^\r\n]*(\r?\n)(?:[ \t]+-[^\r\n]*\r?\n)*/);
   if (!m) throw new Error("missing tags field");
-  const eol = m[1];
+  const eol = m[2];
+  const start = m.index + m[1].length;
   const newBlock = tags.length ? `tags:${eol}${tags.map((t) => `  - ${t}${eol}`).join("")}` : `tags: []${eol}`;
-  return text.slice(0, m.index) + newBlock + text.slice(m.index + m[0].length);
+  return text.slice(0, start) + newBlock + text.slice(m.index + m[0].length);
 }
 
 // Find the body of a `## <header>` section. The body starts after the header
 // line. It stops at the next `## ` heading or at the end of the file. Every
 // section function below uses this one. Thus the rule is in one place.
 function sectionBounds(text, header) {
-  const m = text.match(new RegExp(`^## ${header}\\r?\\n`, "m"));
+  // The heading starts a line by the rule that setFrontmatterField gives, so
+  // both matches also take the line ending before it.
+  const m = text.match(new RegExp(`(^|\\r?\\n)## ${header}\\r?\\n`));
   if (!m) throw new Error(`missing ## ${header} section`);
   const start = m.index + m[0].length;
   const rest = text.slice(start);
-  const next = rest.match(/^## /m);
-  const end = start + (next ? next.index : rest.length);
+  const next = rest.match(/(^|\r?\n)## /);
+  const end = start + (next ? next.index + next[1].length : rest.length);
   return { start, end };
 }
 

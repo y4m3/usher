@@ -874,6 +874,77 @@ async function runTests(fakeVault, checkVault) {
     assert(checkVault(fakeVault).length === 0, "create rollback: vault lints clean again once the trap is removed");
   }
 
+  // U+2028 starts a line for a JavaScript multiline regex and for nothing else
+  // here: every reader of a ticket splits on `\r?\n`. A writer that used the
+  // `m` flag thus edited text that no reader ever saw, kept the real line, and
+  // still reported success. The hidden `status:`, `tags:` and `## Log` below
+  // each sit after one, and each comes before the real line of its kind.
+  {
+    const LS = "\u2028";
+    // Earlier tests create tickets, so take the next free id rather than a
+    // fixed one: a duplicate id makes the whole vault fail the lint.
+    const id = "T-" + String(currentMaxId(fakeVault) + 1).padStart(4, "0");
+    const file = path.join(fakeVault, "tickets", `${id}-line-boundary.md`);
+    const trap = [
+      "---",
+      `id: ${id}`,
+      'title: "Line boundary trap"',
+      `# note${LS}status: hidden`,
+      "status: open",
+      "priority: normal",
+      "project: ",
+      "repos: []",
+      `# note${LS}tags: [hidden]`,
+      "tags: []",
+      "created: 2026-08-09",
+      "due: ",
+      "closed: ",
+      `branch: ${id}-line-boundary`,
+      "---",
+      "",
+      "## Summary",
+      "",
+      `A body line${LS}## Log`,
+      "",
+      "## Notes",
+      "",
+      "- ",
+      "",
+      "## Log",
+      "",
+      "- 2026-08-09 00:00 — created",
+      "",
+    ].join("\n");
+    fs.writeFileSync(file, trap, "utf8");
+    assert(checkVault(fakeVault).length === 0, "U+2028: the trap ticket lints clean, so the writers must handle it");
+
+    const post = (suffix, body) =>
+      fetch(`${BASE}/api/tickets/${id}/${suffix}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    await post("status", { status: "doing" });
+    await post("fields", { tags: ["real"] });
+    await post("log", { text: "appended after U+2028" });
+    const after = fs.readFileSync(file, "utf8");
+
+    assert(/\nstatus: doing\r?\n/.test(after), "U+2028: the status write finds the real status line");
+    assert(after.includes(`# note${LS}status: hidden`), "U+2028: and leaves the text after the separator alone");
+    assert(/\ntags:\r?\n {2}- real\r?\n/.test(after), "U+2028: the tags write finds the real tags block");
+    assert(after.includes(`# note${LS}tags: [hidden]`), "U+2028: and leaves the text after the separator alone");
+    assert(
+      after.slice(after.lastIndexOf("\n## Log")).includes("appended after U+2028"),
+      "U+2028: the log append goes into the real ## Log section",
+    );
+    // Not "the body text is still there": the append puts the entry after it,
+    // so that holds either way. The Summary section must keep its bytes.
+    const summaryOf = (t) => t.slice(t.indexOf("## Summary"), t.indexOf("## Notes"));
+    assert(summaryOf(after) === summaryOf(trap), "U+2028: and appends nothing to the heading-like body line");
+    assert(checkVault(fakeVault).length === 0, "U+2028: the vault still lints clean after the three writes");
+    fs.rmSync(file);
+  }
+
   // If checkVault() throws instead of returning problems (e.g. a stray
   // directory under tickets/ that looks like a ticket file), writeTicket must
   // still restore the original content before the error propagates. This is
