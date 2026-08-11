@@ -717,6 +717,22 @@ async function runTests(fakeVault, checkVault) {
     );
   }
 
+  // A field whose line was deleted outright. The value checks above only look
+  // at values, so a ticket with no `closed:` line at all used to lint clean —
+  // and then failed the first status change, because both write engines edit
+  // that line in place and neither can add one.
+  for (const field of ["project", "repos", "tags", "due", "closed", "branch"]) {
+    const errors = lintBrokenVault((tmp) => {
+      const file = ticketFile(tmp, "T-0002");
+      const text = fs.readFileSync(file, "utf8");
+      fs.writeFileSync(file, text.replace(new RegExp(`^${field}:.*\\r?\\n`, "m"), ""), "utf8");
+    });
+    assert(
+      errors.filter((e) => e.endsWith(`missing ${field}`)).length === 1,
+      `lint rejects a ticket with no ${field}: line (got ${JSON.stringify(errors)})`
+    );
+  }
+
   // unquote() decodes the YAML double-quoted escapes this vault needs: a
   // \uXXXX code point, a literal backslash, and a tab. Written straight into
   // the fakeVault (not the committed fixture) since these are valid,

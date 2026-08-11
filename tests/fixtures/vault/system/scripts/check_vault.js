@@ -115,6 +115,15 @@ function checkVault(root) {
     const created = unquote(fm.created);
     if (created === undefined || created === "") err("missing created");
     else if (!DATE.test(created)) err(`bad created "${created}" (want YYYY-MM-DD)`);
+    // Every field keeps its line, even with an empty value. id, title, status,
+    // priority and created are covered above by their own value checks; these
+    // six can legitimately be empty, so only the line itself is checked. Both
+    // write engines edit a field line in place and cannot add a missing one,
+    // so a file without the line lints clean here and then fails the first
+    // status change.
+    for (const k of ["project", "repos", "tags", "due", "closed", "branch"]) {
+      if (fm[k] === undefined) err(`missing ${k}`);
+    }
     for (const k of ["due", "closed"]) {
       const v = unquote(fm[k]);
       if (v && !DATE.test(v)) err(`bad ${k} "${v}" (want YYYY-MM-DD)`);

@@ -480,6 +480,17 @@ pub fn lint_content(file_name: &str, text: &str) -> Vec<String> {
         }
         Some(_) => {}
     }
+    // Every field keeps its line, even with an empty value. id, title, status,
+    // priority and created are covered above by their own value checks; these
+    // six can legitimately be empty, so only the line itself is checked. Both
+    // write engines edit a field line in place and cannot add a missing one,
+    // so a file without the line lints clean here and then fails the first
+    // status change.
+    for key in ["project", "repos", "tags", "due", "closed", "branch"] {
+        if raw(key).is_none() {
+            errors.push(format!("missing {key}"));
+        }
+    }
     for key in ["due", "closed"] {
         let value = get(key).unwrap_or_default();
         if !value.is_empty() && !is_date(&value) {
@@ -1566,6 +1577,15 @@ mod tests {
                 swap("branch: T-0042-sample", "branch: feature/x"),
                 "branch \"feature/x\" does not start with T-0042",
             ),
+            // A deleted field line. The value checks only look at values, so
+            // these used to lint clean and then break the first status change:
+            // both write engines edit the line in place, neither adds one.
+            (SAMPLE_NAME, swap("project: \n", ""), "missing project"),
+            (SAMPLE_NAME, swap("repos: []\n", ""), "missing repos"),
+            (SAMPLE_NAME, swap("tags: []\n", ""), "missing tags"),
+            (SAMPLE_NAME, swap("due: \n", ""), "missing due"),
+            (SAMPLE_NAME, swap("closed: \n", ""), "missing closed"),
+            (SAMPLE_NAME, swap("branch: T-0042-sample\n", ""), "missing branch"),
         ];
         for (name, text, expect) in cases {
             let problems = lint_content(name, &text);
