@@ -2,13 +2,15 @@
 // This shell uses no sidecar plugin and no shell plugin. A plain
 // std::process::Command is sufficient.
 //
-// A GUI shell has no console. Without this, Windows attaches one and it stays
-// on screen behind the window. Debug builds keep the console for the logs.
+// A GUI shell has no console. Without the attribute below, Windows gives the
+// shell a console. The console then stays on the screen behind the window.
+// A debug build keeps the console, because the log messages go to it.
 //
-// ponytail: the cost is that the startup diagnostics below only reach someone
-// who started the exe from a terminal. Launched from Explorer or a shortcut, a
-// release build just fails to open a window. Showing the reason there needs a
-// Win32 MessageBoxW or a dialog crate; add one if this bites.
+// ponytail: the attribute has a cost. Only a user who starts the exe from a
+// terminal can read the messages below. If the user starts a release build
+// from Explorer or from a shortcut, the window does not open and the shell
+// gives no reason. To show the reason there, use the Win32 MessageBoxW
+// function or a dialog crate. Add one if this becomes a problem.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 use std::net::{TcpListener, TcpStream};
 use std::path::Path;
@@ -18,22 +20,23 @@ use std::time::{Duration, Instant};
 use std::os::windows::process::CommandExt;
 
 /// CREATE_NO_WINDOW. A console subsystem child (node) opens its own console
-/// window when the parent has none. This flag suppresses it.
+/// window if the parent has no console. This flag stops that window.
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-/// Fixed port for server.js; also hardcoded in tauri.conf.json's window url.
+/// The port for server.js. The window url in tauri.conf.json contains the
+/// same number.
 const PORT: u16 = 3000;
 
-/// Wait until server.js listens on `port`. The error is the line to print:
-/// the caller has nothing to add and nothing to decide.
+/// Wait until server.js listens on `port`. The error is the message to print.
+/// The caller adds nothing to it and makes no decision from it.
 fn wait_for_port(child: &mut Child, port: u16, timeout: Duration) -> Result<(), String> {
     let start = Instant::now();
     while start.elapsed() < timeout {
-        // Ask try_wait() first. If the child is already dead, some other
-        // process can hold the port (see the bind comment below). A connect
-        // that finds that process would point the WebView at it, instead of
-        // a report of the crash.
+        // Call try_wait() first. If the child stopped, a different process
+        // can hold the port (see the comment at the bind below). A successful
+        // connection then points the WebView at that process. The shell must
+        // report the stop of the child instead.
         if let Ok(Some(status)) = child.try_wait() {
             return Err(format!(
                 "usher: server.js exited before opening port {port} (status: {status})."
@@ -57,16 +60,16 @@ fn main() {
         .parent()
         .expect("desktop/ has a parent directory");
 
-    // Claim the port ourselves first so we can tell "someone else is already
-    // listening on it" apart from "our own child hasn't opened it yet". If
-    // another usher instance (or anything else) already holds the port, the
-    // child would fail to bind it and either die (EADDRINUSE) or, worse, we'd
-    // end up pointing the WebView at that unrelated process. Release it
-    // immediately so the child can bind it in turn.
-    // ponytail: the gap between dropping this listener and spawning the
-    // child remains -- another process can still grab the port in between.
-    // Closing it for good would mean passing the bound socket to the child
-    // instead of letting it bind its own.
+    // Bind the port here, before the shell starts the child. This tells two
+    // conditions apart: a different process listens on the port already, and
+    // the child did not open the port yet. If a different process holds the
+    // port, the child cannot bind it. The child then stops with EADDRINUSE,
+    // or the shell shows the pages of that other process in the WebView.
+    // Release the port immediately, because the child must bind it.
+    // ponytail: a gap stays between the release of this listener and the
+    // start of the child. A different process can take the port in that gap.
+    // To remove the gap, give the bound socket to the child. The child must
+    // then not bind its own socket.
     match TcpListener::bind(("127.0.0.1", PORT)) {
         Ok(listener) => drop(listener),
         Err(err) => {
@@ -81,20 +84,20 @@ fn main() {
 
     let mut command = Command::new("node");
     command.arg("server.js").current_dir(repo_root);
-    // Hand our own vault argument to the child, so the desktop shell resolves
-    // the vault in the same order as the other two front ends. The child runs
-    // with repo_root as its working directory, so a relative path has to be
-    // made absolute here -- otherwise it would resolve against the repository
-    // rather than the directory the user typed the command in.
+    // Give the vault argument of the shell to the child. The desktop shell
+    // then finds the vault in the same order as the other two front ends.
+    // The working directory of the child is repo_root. Thus make a relative
+    // path absolute here. If you do not, the child finds the path from the
+    // repository, and not from the directory of the user.
     if let Some(vault) = std::env::args_os().nth(1) {
         match std::env::current_dir() {
             Ok(cwd) => command.arg(cwd.join(vault)),
             Err(_) => command.arg(vault),
         };
     }
-    // server.js honours PORT; the shell's URL (tauri.conf.json) and wait_for_port
-    // below are fixed at 3000, so pin the child to that port regardless of the
-    // parent environment's PORT.
+    // server.js reads the PORT variable. The url in tauri.conf.json and
+    // wait_for_port below always use 3000. Thus set PORT for the child, and
+    // ignore the PORT variable of the parent environment.
     command.env("PORT", PORT.to_string());
     #[cfg(windows)]
     command.creation_flags(CREATE_NO_WINDOW);

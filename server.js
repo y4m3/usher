@@ -21,27 +21,28 @@ const PRIORITY = ["urgent", "high", "normal", "low"];
 const ID_RE = /^T-\d{4}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TAG_RE = /^[A-Za-z0-9_][A-Za-z0-9_/-]*$/;
-// The closing "---" must end the line (only trailing spaces/tabs allowed), or
-// text like "---oops" would be accepted as the terminator. The lookahead does
-// not consume the newline, so `m[0]` still ends right after "---", same as
-// before.
+// The closing "---" must be at the end of its line. Only spaces and tabs can
+// follow it. Without this rule, text such as "---oops" closes the
+// frontmatter. The lookahead does not read the newline. Thus `m[0]` ends
+// directly after the "---", as before.
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---(?=[ \t]*\r?\n|[ \t]*$)/;
 
-// The escapes this vault actually needs from a YAML double-quoted scalar.
-// Kept identical in check_vault.js, which validates against the same table.
+// The escapes that this vault needs from a YAML double-quoted scalar.
+// check_vault.js contains the same table and validates against it.
 const YAML_ESCAPES = { "\\": "\\", '"': '"', "/": "/", n: "\n", t: "\t", r: "\r", 0: "\0" };
 
-// Resolve the escapes inside the (already unwrapped) body of a double-quoted
-// scalar. An escape outside the table above is unknown: leave the backslash
-// in place rather than guess, so the value is never silently corrupted.
-// check_vault.js flags what this leaves behind.
+// Resolve the escapes in the body of a double-quoted scalar. The caller
+// removes the quotes before this function reads the body. An escape that the
+// table above does not contain is unknown. Keep the backslash of an unknown
+// escape. Thus this function does not corrupt the value. check_vault.js
+// reports the value that this function keeps.
 //
-// \uD800-\uDFFF (the surrogate range) is also left as-is: Rust's
-// char::from_u32 rejects lone surrogates and does not compose surrogate
-// pairs, so treating a surrogate \uXXXX as unknown is the only reading both
-// front ends agree on. An astral character (above U+FFFF) still works fine
-// written literally in the file as UTF-8 — this only affects the \uXXXX
-// escape form.
+// This function also keeps a \uXXXX escape in the surrogate range
+// (\uD800-\uDFFF). The Rust function char::from_u32 refuses a lone surrogate
+// and does not make a pair from two surrogates. Thus an unknown surrogate
+// escape is the only result that the two front ends agree on. A character
+// above U+FFFF is still correct if the file contains it as UTF-8 text. This
+// rule applies only to the \uXXXX form.
 function unescapeYaml(body) {
   return body.replace(/\\(?:u([0-9a-fA-F]{4})|x([0-9a-fA-F]{2})|(.))/g, (full, u, x, ch) => {
     if (u !== undefined) {
@@ -73,7 +74,8 @@ function parseFrontmatter(text) {
   const fm = {};
   for (const line of m[1].split(/\r?\n/)) {
     const kv = line.match(/^(\w+):\s*(.*)$/);
-    // First key wins on a duplicate, same as the TUI (Rust side) parser.
+    // If a key occurs more than one time, use the first one. The TUI parser
+    // (the Rust side) uses the same rule.
     if (kv && !(kv[1] in fm)) fm[kv[1]] = kv[2].trim();
   }
   return fm;
@@ -97,11 +99,12 @@ function parseTags(text) {
   return tags;
 }
 
-// One file that cannot be read, or that carries no frontmatter, does not take
-// the board down with it: it is left out and named on the server's console.
-// The TUI does the same (load_tickets returns its warnings). Without this a
-// plain note dropped into tickets/ became a ticket with every field empty, and
-// a directory called something.md made this whole call fail with EISDIR.
+// This function keeps the board available if one file is unreadable, or if
+// one file has no frontmatter. It leaves that file out and writes its name to
+// the console of the server. The TUI does the same: load_tickets returns its
+// warnings. Before this rule, a plain note in tickets/ became a ticket with
+// empty fields. A directory with a name that ends in .md stopped this
+// function with the EISDIR error.
 function listTickets() {
   const names = fs.readdirSync(ticketsDir).filter((n) => n.endsWith(".md"));
   return names.flatMap((name) => {
@@ -136,10 +139,10 @@ function findTicketFile(id) {
   return name ? path.join(ticketsDir, name) : null;
 }
 
-// A project note is either projects/<name>.md, or projects/<name>/<name>.md
-// when the vault uses one folder per project (an Obsidian folder note). Only
-// the top level is scanned, so the theme folders that may live inside a
-// project folder do not end up in the list.
+// A project note is projects/<name>.md. If the vault has one folder for each
+// project, the project note is projects/<name>/<name>.md. Obsidian calls this
+// a folder note. This function reads the top level only. Thus a theme folder
+// in a project folder does not go into the list.
 function listProjects() {
   if (!fs.existsSync(projectsDir)) return [];
   return fs.readdirSync(projectsDir, { withFileTypes: true }).flatMap((entry) => {
@@ -152,8 +155,9 @@ function listProjects() {
   }).sort();
 }
 
-// Checked against the list, not against a built path, so that a name with a
-// separator or ".." in it can never resolve to a file outside projects/.
+// This function compares the name with the list. It does not make a path from
+// the name. Thus a name that contains a separator or ".." cannot point to a
+// file outside projects/.
 function projectExists(name) {
   return listProjects().includes(name);
 }
@@ -184,8 +188,8 @@ function setFrontmatterField(text, key, value) {
   const block = m[0];
   const re = new RegExp(`^${key}:[^\\r\\n]*`, "m");
   if (!re.test(block)) throw new Error(`missing ${key} field`);
-  // A function replacement, so a `$&`/`$1`/etc. in value is never read as a
-  // regex replacement pattern.
+  // The replacement is a function. Thus a `$&` or a `$1` in the value stays
+  // literal text. A string replacement reads such text as a pattern.
   const newBlock = block.replace(re, () => `${key}: ${value}`);
   return text.slice(0, m.index) + newBlock + text.slice(m.index + block.length);
 }
@@ -197,10 +201,12 @@ function setTagsBlock(text, tags) {
   const fm = text.match(FRONTMATTER_RE);
   if (!fm) throw new Error("missing frontmatter");
   const block = text.slice(0, fm.index + fm[0].length);
-  // The capture is the ending of the `tags:` line this block replaces, not the
-  // ending of the file: in a file with mixed endings those differ, and the TUI
-  // (line_cr) takes it from the line. Taking it from the file would have the
-  // two engines write different bytes for the same edit.
+  // The capture group holds the line ending of the `tags:` line that this
+  // function replaces. It does not hold the line ending of the file. In a file
+  // with mixed line endings the two are different. The TUI function line_cr
+  // also reads the line ending from the line. If this function reads the line
+  // ending from the file, the two engines write different bytes for the same
+  // edit.
   const m = block.match(/^tags:[^\r\n]*(\r?\n)(?:[ \t]+-[^\r\n]*\r?\n)*/m);
   if (!m) throw new Error("missing tags field");
   const eol = m[1];
@@ -226,19 +232,20 @@ function sectionBounds(text, header) {
 function appendLog(text, line) {
   const { start, end } = sectionBounds(text, "Log");
   const section = text.slice(start, end);
-  // Whole blank lines only, not `\s+$`: that also ate the trailing spaces of
-  // the last entry and put them back after the new one, rewriting a line this
-  // append must not touch. The TUI walks back over blank lines and leaves the
-  // entry above them alone; this is the same rule.
+  // Take full blank lines only. The pattern `\s+$` also takes the spaces at
+  // the end of the last entry. It then puts those spaces after the new entry.
+  // This changes a line that the append must not change. The TUI goes back
+  // over the blank lines and does not change the entry above them. The rule
+  // here is the same.
   const trailingWS = /(?:\r?\n[ \t]*)*$/.exec(section)[0];
   const trimmed = section.slice(0, section.length - trailingWS.length);
   const eol = detectEOL(text);
   const newSection = trimmed + eol + line + trailingWS;
   const out = text.slice(0, start) + newSection + text.slice(end);
-  // Give a file that does not end in a newline one, the same as the TUI's
-  // append_log_line does. The TUI needs the terminator because it rebuilds the
-  // file with join("\n"); skipping it here would leave the two engines writing
-  // different bytes for the same append.
+  // If the file has no newline at the end, add one. The TUI function
+  // append_log_line does the same. The TUI needs the final newline, because it
+  // makes the file again with join("\n"). If this function does not add the
+  // newline, the two engines write different bytes for the same append.
   return out.endsWith("\n") ? out : out + eol;
 }
 
@@ -362,9 +369,10 @@ function writeTicket(filePath, mutate) {
   const original = exists ? fs.readFileSync(filePath, "utf8") : null;
   const updated = mutate(original);
   fs.writeFileSync(filePath, updated, "utf8");
-  // A failed rollback must not hide whatever made us roll back, and it must not
-  // pass in silence either: the rejected edit is then still on disk, and this
-  // is the only place that can say so. Returns the trouble, or null.
+  // A rollback can fail. Such a failure must not remove the error that caused
+  // the rollback. It must not stay unreported either, because the rejected
+  // edit is then still on the disk. Only this function knows that. It returns
+  // the message about the failure, or null.
   const rollback = () => {
     try {
       if (exists) fs.writeFileSync(filePath, original, "utf8");
@@ -484,9 +492,9 @@ const server = http.createServer(async (req, res) => {
         writeTicket(file, (text) => {
           text = setFrontmatterField(text, "status", body.status);
           if (body.status === "done") text = setFrontmatterField(text, "closed", todayDate());
-          // Only the new status decides: moving to anything but done or
-          // archived clears closed, moving to archived leaves it alone. That
-          // is what keeps closed as the record of when the work finished.
+          // The new status alone controls the closed field. A move to a status
+          // other than done or archived clears closed. A move to archived
+          // keeps closed. Thus closed always shows when the work stopped.
           else if (body.status !== "archived") text = setFrontmatterField(text, "closed", "");
           const msg = logMessageFor(body.status, body.note);
           return appendLog(text, `- ${nowStamp()} — ${msg}`);

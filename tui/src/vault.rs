@@ -35,9 +35,10 @@ pub struct Ticket {
 impl Ticket {
     fn parse(path: &Path, text: &str) -> Result<Self, String> {
         let lines = split_lines(text);
-        // Every other error branch of this function names the file. Do the
-        // same here, so a warning collected across many files (load_tickets)
-        // says which one is a plain note with no frontmatter at all.
+        // All the other error messages of this function contain the name of
+        // the file. Put the name in this message too. load_tickets collects
+        // the messages of many files. The message must thus tell the user
+        // which file is a plain note without frontmatter.
         let end = frontmatter_end(&lines).map_err(|e| format!("{}: {e}", path.display()))?;
         let get = |key: &str| fm_get(&lines[1..end], key).unwrap_or_default();
 
@@ -68,10 +69,11 @@ impl Ticket {
     }
 }
 
-/// Load every `<vault>/tickets/*.md` note, sorted by id. A file that fails to
-/// read or to parse does not stop the load: it is skipped, and its message
-/// (which names the file) goes into the second return value. Only a failure
-/// to read the `tickets/` directory itself is an `Err`.
+/// Load each `<vault>/tickets/*.md` note. The notes are sorted by id. If a
+/// file does not read or does not parse, the load continues. This function
+/// leaves that file out and puts its message in the second return value. The
+/// message contains the name of the file. The function returns `Err` only if
+/// it cannot read the `tickets/` directory.
 pub fn load_tickets(vault: &Path) -> Result<(Vec<Ticket>, Vec<String>), String> {
     let dir = vault.join("tickets");
     let entries = fs::read_dir(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
@@ -118,9 +120,9 @@ pub fn change_status(path: &Path, new_status: &str, note: Option<&str>) -> Resul
     if new_status == "done" {
         fm_set(&mut lines[1..end], "closed", &today())?;
     } else if new_status != "archived" {
-        // Moving to any status other than done or archived clears closed.
-        // Archived is the one exception, so that a done ticket which is later
-        // archived keeps the date its work finished.
+        // A move to a status other than done or archived clears closed.
+        // Archived is the only exception. Thus a done ticket that a user
+        // archives later keeps the date on which the work stopped.
         fm_set(&mut lines[1..end], "closed", "")?;
     }
     append_log_line(&mut lines, &transition_note(new_status, note), cr)?;
@@ -212,8 +214,9 @@ pub fn set_tags(path: &Path, tags: &[String]) -> Result<(), String> {
         .take_while(|l| l.starts_with(char::is_whitespace) && l.trim_start().starts_with("- "))
         .count();
 
-    // The whole block is rebuilt. Give it the ending of the `tags:` line it
-    // replaces, so a pure LF or pure CRLF file keeps its bytes.
+    // This code makes the full block again. Give the block the line ending of
+    // the `tags:` line that it replaces. An LF file and a CRLF file then keep
+    // their bytes.
     let cr = line_cr(&lines[at]);
     let block: Vec<String> = if unique.is_empty() {
         vec![format!("tags: []{cr}")]
@@ -242,11 +245,11 @@ pub fn get_section(text: &str, header: &str) -> Result<String, String> {
         .to_string())
 }
 
-/// The project note names, sorted. A project note is either
-/// `<vault>/projects/<name>.md`, or `<vault>/projects/<name>/<name>.md` when the
-/// vault uses one folder per project (an Obsidian folder note). Only the top
-/// level is scanned, so the theme folders that may live inside a project folder
-/// do not end up in the list.
+/// The names of the project notes, sorted. A project note is
+/// `<vault>/projects/<name>.md`. If the vault has one folder for each project,
+/// the project note is `<vault>/projects/<name>/<name>.md`. Obsidian calls
+/// this a folder note. This function reads the top level only. Thus a theme
+/// folder in a project folder does not go into the list.
 pub fn list_projects(vault: &Path) -> Vec<String> {
     let mut names = Vec::new();
     let Ok(entries) = fs::read_dir(vault.join("projects")) else {
@@ -270,8 +273,9 @@ pub fn list_projects(vault: &Path) -> Vec<String> {
     names
 }
 
-/// Checked against the list, not against a built path, so that a name with a
-/// separator or ".." in it can never resolve to a file outside `projects/`.
+/// This function compares the name with the list. It does not make a path from
+/// the name. Thus a name that contains a separator or ".." cannot point to a
+/// file outside `projects/`.
 pub fn project_exists(vault: &Path, name: &str) -> bool {
     list_projects(vault).iter().any(|n| n == name)
 }
@@ -423,10 +427,10 @@ pub fn lint_content(file_name: &str, text: &str) -> Vec<String> {
     let raw = |key: &str| fm_get(fm, key);
     let get = |key: &str| raw(key).map(|v| unquote(&v));
 
-    // check_vault.js reports a duplicate while it parses the frontmatter, so
-    // this comes before the field checks. The first key still wins everywhere
-    // else, in both front ends; a duplicate is a schema error, not a conflict
-    // to resolve quietly.
+    // check_vault.js reports a repeated key while it parses the frontmatter.
+    // This check is thus before the field checks. Everywhere else, and in both
+    // front ends, the first key applies. A repeated key is an error in the
+    // schema. The lint must report it.
     let mut seen: Vec<&str> = Vec::new();
     for (key, _) in fm.iter().filter_map(|l| parse_kv(l)) {
         if seen.contains(&key) {
@@ -480,12 +484,12 @@ pub fn lint_content(file_name: &str, text: &str) -> Vec<String> {
         }
         Some(_) => {}
     }
-    // Every field keeps its line, even with an empty value. id, title, status,
-    // priority and created are covered above by their own value checks; these
-    // six can legitimately be empty, so only the line itself is checked. Both
-    // write engines edit a field line in place and cannot add a missing one,
-    // so a file without the line lints clean here and then fails the first
-    // status change.
+    // Each field must keep its line, also with an empty value. The checks
+    // above read the values of id, title, status, priority and created. The
+    // six fields below can be empty. This loop thus looks for the line only.
+    // The two write engines change a field line in its position. They cannot
+    // add a line that is not there. Without this loop, a file without the line
+    // passes the lint, and then the first status change fails.
     for key in ["project", "repos", "tags", "due", "closed", "branch"] {
         if raw(key).is_none() {
             errors.push(format!("missing {key}"));
@@ -503,8 +507,9 @@ pub fn lint_content(file_name: &str, text: &str) -> Vec<String> {
     if !get("closed").unwrap_or_default().is_empty()
         && !matches!(status.as_deref(), Some("done" | "archived"))
     {
-        // "undefined" for a missing status: check_vault.js interpolates the
-        // JS value, and this message must match it word for word.
+        // Write "undefined" if the status is not there. check_vault.js puts
+        // the JS value in the text. This message must be the same, word for
+        // word.
         errors.push(format!(
             "closed is set but status is \"{}\" (want done or archived)",
             status.as_deref().unwrap_or("undefined")
@@ -602,45 +607,47 @@ fn transition_note(status: &str, note: Option<&str>) -> String {
     }
 }
 
-/// What to put at the end of a line that this module *adds*, where there is no
-/// old line to take an ending from: the style of the file as a whole, read from
-/// its bytes rather than taken from the platform. A line that already exists
-/// keeps whatever ending it has (see `split_lines` and `line_cr`).
+/// The line ending for a line that this module adds. Such a line has no old
+/// ending to keep. Read the style of the full file from its bytes. Do not use
+/// the style of the platform. A line that is already in the file keeps its own
+/// ending (see `split_lines` and `line_cr`).
 fn eol_cr(text: &str) -> &'static str {
     if text.contains("\r\n") { "\r" } else { "" }
 }
 
-/// The `'\r'` a line already carries, or `""`. A line that is rebuilt in place
-/// keeps the ending it had. Thus an edit changes the text of that line and
-/// nothing else, also in a file with mixed endings.
+/// The `'\r'` that a line has, or `""`. A line that this module makes again
+/// keeps the ending that it had. Thus an edit changes the text of that line
+/// and no other byte, also in a file with mixed endings.
 fn line_cr(line: &str) -> &'static str {
     if line.ends_with('\r') { "\r" } else { "" }
 }
 
-/// Split on `'\n'` only. The `'\r'` of a CRLF ending stays on the line, so
-/// `split_lines(text).join("\n")` gives back the same bytes for any file, one
-/// with mixed endings included. Thus a line that no edit touches keeps its own
-/// ending. Every reader below therefore has to tolerate a trailing `'\r'`.
+/// Split at each `'\n'`. The `'\r'` of a CRLF ending stays on the line. Thus
+/// `split_lines(text).join("\n")` gives the bytes of the file again, also for
+/// a file with mixed endings, and a line that no edit changes keeps its own
+/// ending. Each reader below must therefore accept a `'\r'` at the end of a
+/// line.
 fn split_lines(text: &str) -> Vec<String> {
     text.split('\n').map(str::to_string).collect()
 }
 
-/// The *closing* fence line without the run it may trail: the `'\r'` that
-/// `split_lines` now leaves on the line, and then spaces and tabs. Spaces and
-/// tabs only, to match the `[ \t]*` in server.js and check_vault.js --
-/// `trim_end` would also take a no-break space and the rest of Unicode
-/// whitespace, and then a file ending `---\u{a0}` would read as valid here and
-/// as `missing frontmatter` there. The '\r' comes off first because it sits
-/// after the padding, exactly where the `[ \t]*\r?\n` in those two regexes
-/// puts it.
+/// The closing fence line without the characters after the dashes: first the
+/// `'\r'` that `split_lines` leaves on the line, then the spaces and the tabs.
+/// Remove spaces and tabs only. The regexes in server.js and check_vault.js
+/// allow `[ \t]*` there. `trim_end` also removes a no-break space and the
+/// other Unicode space characters. A file that ends with `---\u{a0}` is then
+/// correct here, but has `missing frontmatter` in the two other readers.
+/// Remove the `'\r'` first, because it is after the spaces and the tabs. The
+/// `[ \t]*\r?\n` in the two regexes puts it in the same position.
 fn fence(line: &str) -> &str {
     line.trim_end_matches('\r').trim_end_matches([' ', '\t'])
 }
 
 fn frontmatter_end(lines: &[String]) -> Result<usize, String> {
-    // The opening fence takes no padding at all: both regexes start `^---\r?\n`
-    // and give the `[ \t]*` to the closing fence only. A file that opens with
-    // `--- ` has no frontmatter for either front end, so it must have none here.
+    // The opening fence allows no spaces and no tabs. The two regexes start
+    // with `^---\r?\n` and allow `[ \t]*` at the closing fence only. A file
+    // that starts with `--- ` has no frontmatter for the two other front ends.
+    // It must thus have no frontmatter here.
     if lines.first().map(|l| l.trim_end_matches('\r')) != Some("---") {
         return Err("missing frontmatter".to_string());
     }
@@ -655,9 +662,9 @@ fn frontmatter_end(lines: &[String]) -> Result<usize, String> {
 
 /// `key: value`. This is the Rust form of `^(\w+):\s*(.*)$` in check_vault.js.
 /// An indented list item (`  - "[[repo]]"`) fails the key test. This function
-/// skips it. JavaScript's `\w` is ASCII-only (the regex has no `u` flag), so
-/// the key test is `is_ascii_alphanumeric`, not `is_alphanumeric`: a line like
-/// `é: x` is a key for neither front end.
+/// skips it. In JavaScript, `\w` matches ASCII characters only, because the
+/// regex has no `u` flag. The test here is thus `is_ascii_alphanumeric`, and
+/// not `is_alphanumeric`. A line such as `é: x` is a key in no front end.
 fn parse_kv(line: &str) -> Option<(&str, &str)> {
     let (key, value) = line.split_once(':')?;
     if key.is_empty() || !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
@@ -694,10 +701,10 @@ fn fm_set(fm: &mut [String], key: &str, value: &str) -> Result<(), String> {
         .iter_mut()
         .find(|l| parse_kv(l).is_some_and(|(k, _)| k == key))
         .ok_or_else(|| format!("no `{key}:` line in the frontmatter"))?;
-    // This builds the whole line again, ending included. Take the ending of
-    // the line that is replaced, not of the file.
+    // This code makes the full line again, with its ending. Take the ending
+    // of the line that it replaces. Do not take the ending of the file.
     let cr = line_cr(line);
-    // The vault writes an empty value as "key: ": colon, space, nothing.
+    // The vault writes an empty value as "key: ": a colon, a space, nothing.
     *line = if value.is_empty() {
         format!("{key}: {cr}")
     } else {
@@ -710,8 +717,9 @@ fn fm_set(fm: &mut [String], key: &str, value: &str) -> Result<(), String> {
 /// header line. It stops at the next `## ` heading or at the end of the file.
 fn section_bounds(lines: &[String], header: &str) -> Result<(usize, usize), String> {
     let heading = format!("## {header}");
-    // The '\r' only, not trim_end: server.js matches `^## <header>\r?\n`, so a
-    // heading with a space after it is no heading there and must be none here.
+    // Remove the `'\r'` only. Do not use trim_end. server.js matches
+    // `^## <header>\r?\n`. A heading with a space after it is thus no heading
+    // in server.js, and it must be no heading here.
     let start = 1 + lines
         .iter()
         .position(|l| l.trim_end_matches('\r') == heading)
@@ -724,15 +732,17 @@ fn section_bounds(lines: &[String], header: &str) -> Result<(usize, usize), Stri
 }
 
 fn append_log_line(lines: &mut Vec<String>, text: &str, cr: &str) -> Result<(), String> {
-    // In this representation a line's trailing '\r' belongs to the separator
-    // that follows it, and `join("\n")` supplies the '\n' half. A file that
-    // does not end in a newline therefore has a last line with no separator at
-    // all, and appending after it would build one separator out of the old
-    // line's (missing) '\r' and the new '\n' — a bare LF — while the added
-    // line's own '\r' would end up at EOF as a lone CR. Give the file its
-    // terminating newline first, so every separator is of one kind. This is
-    // the only place that adds lines to a file, so it is the only place that
-    // needs it; the read-only and rewrite-in-place paths must not touch it.
+    // In this module the `'\r'` at the end of a line is part of the separator
+    // after that line. `join("\n")` gives the `'\n'` part of the separator. A
+    // file without a newline at the end thus has a last line with no
+    // separator. If this function adds a line after that last line, it makes
+    // one separator from the missing `'\r'` of the old line and the new
+    // `'\n'`. The result is a bare LF. The `'\r'` of the new line then goes to
+    // the end of the file as a single CR. To prevent this, add the final
+    // newline first. All the separators are then of one type. This function
+    // is the only one that adds lines to a file. It is thus the only one that
+    // needs the rule. The functions that only read, or that only change a line
+    // in its position, must not add the newline.
     if lines.last().is_some_and(|l| !l.is_empty()) {
         let last = lines.len() - 1;
         lines[last].push_str(cr);
@@ -793,11 +803,12 @@ fn is_valid_tag(value: &str) -> bool {
         && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '/' | '-'))
 }
 
-/// The body of a `"`-delimited scalar that spans the whole of `value`, or
-/// `None` if `value` is not exactly one (no trailing garbage, no missing
-/// close). A `\` escapes exactly the next character, a quote included, so
-/// that scanning for the close never stops on an escaped `"`. This says
-/// nothing about which escapes `resolve_escape` below can actually resolve.
+/// The body of a `"`-delimited scalar that fills all of `value`. The result
+/// is `None` if `value` is not one such scalar: text after the closing quote,
+/// or no closing quote. A `\` escapes the next character, also a quote. Thus
+/// the search for the closing quote does not stop at an escaped `"`. This
+/// function does not tell you which escapes `resolve_escape` below can
+/// resolve.
 fn double_quoted_body(value: &str) -> Option<&str> {
     let rest = value.strip_prefix('"')?;
     let mut chars = rest.char_indices();
@@ -812,21 +823,23 @@ fn double_quoted_body(value: &str) -> Option<&str> {
     }
 }
 
-/// The body of a `'`-delimited scalar that spans the whole of `value`: no
-/// escaping, and no embedded `'` (there is no way to escape one).
+/// The body of a `'`-delimited scalar that fills all of `value`. Such a
+/// scalar has no escapes. It also has no `'` in the body, because there is no
+/// way to escape one.
 fn single_quoted_body(value: &str) -> Option<&str> {
     let body = value.strip_prefix('\'')?.strip_suffix('\'')?;
     (!body.contains('\'')).then_some(body)
 }
 
-/// Resolve one escape in a double-quoted body, at the position right after
-/// the `\`. This table is shared with `quote_yaml`, `server.js`'s
-/// `unquote`/`quoteYaml` and `check_vault.js`. Returns the resolved
-/// character and how many characters after the `\` belong to the escape (1,
-/// or 5 for `\uXXXX`, or 3 for `\xXX`), or `None` if `rest` does not start
-/// with a recognized escape: an unknown letter, a `\u`/`\x` with too few or
-/// non-hex digits, or a code point `char::from_u32` refuses (e.g. a lone
-/// surrogate half).
+/// Resolve one escape in a double-quoted body. `rest` starts at the first
+/// character after the `\`. `quote_yaml`, the `unquote` and `quoteYaml`
+/// functions of server.js, and check_vault.js use the same table. The result
+/// is the character and the number of characters after the `\` that are part
+/// of the escape: 1, or 5 for `\uXXXX`, or 3 for `\xXX`. The result is `None`
+/// if `rest` does not start with a known escape. These are the causes: an
+/// unknown letter, a `\u` or `\x` with too few digits, a `\u` or `\x` with a
+/// character that is not a hex digit, or a code point that `char::from_u32`
+/// refuses. A single half of a surrogate pair is such a code point.
 fn resolve_escape(rest: &[char]) -> Option<(char, usize)> {
     // to_digit(16) refuses every character that is not a hex digit. It also
     // refuses the sign that from_str_radix accepts. Four digits give 0xFFFF at
@@ -846,10 +859,11 @@ fn resolve_escape(rest: &[char]) -> Option<(char, usize)> {
     }
 }
 
-/// The title check of check_vault.js: a single-quoted scalar with no embedded
-/// `'`, or a double-quoted scalar whose every `\` starts an escape from the
-/// `resolve_escape` table. An unknown escape (`\q`) makes the whole value
-/// malformed, even though `unquote` below still strips such a value's quotes.
+/// The title check of check_vault.js. The value must be a single-quoted
+/// scalar with no `'` in the body, or a double-quoted scalar in which each
+/// `\` starts an escape from the `resolve_escape` table. An unknown escape,
+/// for example `\q`, makes the full value incorrect. `unquote` below still
+/// removes the quotes from such a value.
 fn is_well_formed_quoted(value: &str) -> bool {
     match double_quoted_body(value) {
         Some(body) => resolve_body(body).1,
@@ -857,12 +871,12 @@ fn is_well_formed_quoted(value: &str) -> bool {
     }
 }
 
-/// Walk the body of a double-quoted scalar: the resolved text, and whether
-/// every `\` in it started an escape `resolve_escape` knows. An unknown escape
-/// is kept exactly as written, backslash included, so the text never loses a
-/// character this table does not understand; the flag is what rejects it.
-/// One walk for both readings, so the two can never disagree on what an
-/// unknown escape means.
+/// Read the body of a double-quoted scalar. The result has two parts: the
+/// resolved text, and a flag. The flag is true if each `\` in the body starts
+/// an escape from the `resolve_escape` table. An unknown escape stays as
+/// written, with its backslash. Thus the text keeps each character that the
+/// table does not contain, and the flag reports the error. One pass gives the
+/// two results. Thus they cannot disagree about an unknown escape.
 fn resolve_body(body: &str) -> (String, bool) {
     let chars: Vec<char> = body.chars().collect();
     let mut out = String::with_capacity(body.len());
@@ -889,14 +903,14 @@ fn resolve_body(body: &str) -> (String, bool) {
     (out, well_formed)
 }
 
-/// Same semantics as unquote() in server.js: a `"`- or `'`-delimited scalar
-/// that spans the whole value has its quotes stripped; a double-quoted one
-/// also has its escapes resolved via the `resolve_escape` table. An unknown
-/// escape is left exactly as written, backslash included, so this function
-/// never invents or drops a character it does not understand — rejecting it
-/// is `check_vault.js`'s / `is_well_formed_quoted`'s job. Anything that is
-/// not a `"`- or `'`-delimited scalar spanning the whole value (malformed
-/// quoting included) is returned unchanged.
+/// This function has the same rules as unquote() in server.js. It removes the
+/// quotes from a `"`-delimited or `'`-delimited scalar that fills all of the
+/// value. For a double-quoted scalar it also resolves the escapes with the
+/// `resolve_escape` table. An unknown escape stays as written, with its
+/// backslash. Thus this function adds no character and removes no character
+/// that it does not know. `check_vault.js` and `is_well_formed_quoted` report
+/// such a value. The function returns each other value without a change. This
+/// includes a value with incorrect quotes.
 fn unquote(value: &str) -> String {
     match double_quoted_body(value) {
         Some(body) => resolve_body(body).0,
