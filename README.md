@@ -61,9 +61,10 @@ setx USHER_VAULT C:\path\to\your\vault   # default vault, applies to new shells
 usher                                    # start from anywhere
 ```
 
-All three front ends resolve the vault in the same order: CLI argument, then `USHER_VAULT`,
-then a per-front-end default (`../obsidian` for web/desktop, the current directory for the TUI).
-See [`tui/README.md`](tui/README.md) for the TUI's keys and WSL build.
+The three front ends find the vault in the same order. First the CLI argument,
+then `USHER_VAULT`, then a default. The default for the web and the desktop
+front ends is `../obsidian`. The default for the TUI is the current directory.
+See [`tui/README.md`](tui/README.md) for the keys of the TUI and for the WSL build.
 
 ## The vault format
 
@@ -114,10 +115,10 @@ Fix the thing
 
 Rules:
 
-- **Frontmatter fields**, always present, in this order: `id`, `title`, `status`, `priority`, `project`, `repos`, `tags`, `created`, `due`, `closed`, `branch`. The lint rejects a ticket that is missing one, empty value or not: usher edits a field line in place and cannot add one, so a file without the line would pass the lint and then fail the first write that touches it.
+- **Frontmatter fields**, always present, in this order: `id`, `title`, `status`, `priority`, `project`, `repos`, `tags`, `created`, `due`, `closed`, `branch`. The lint rejects a ticket if one of these lines is not there, also if the value is empty. usher changes a field line in its position and cannot add a line. Without this rule, a file without the line passes the lint, and then the first write to that field fails.
 - An empty scalar value keeps one space after the colon (`due: `). usher keeps that byte.
 - **`status`** is one of: `open`, `doing`, `review`, `done`, `archived`. The board shows the first four.
-- **`closed`** dates the day the work finished. A move to `done` sets it. A move to anything but `done` or `archived` clears it, so the date never outlives the work it describes; `archived` is the exception, so a finished ticket keeps its date when it is filed away. The lint enforces both directions: `done` without a date, and a date without `done` or `archived`.
+- **`closed`** is the date on which the work stopped. A move to `done` sets it. A move to a status other than `done` or `archived` clears it. The date thus always agrees with the status. `archived` is the exception: a completed ticket keeps its date. The lint checks the two conditions: `done` without a date, and a date without `done` or `archived`.
 - **`priority`** is one of: `urgent`, `high`, `normal`, `low`.
 - **Body sections**, in this order: `## Summary`, `## Notes`, `## Log`.
 - usher edits Summary and Notes. Log is append-only, one line for each entry: `- YYYY-MM-DD HH:mm — message`.
@@ -146,8 +147,8 @@ usher does not normalize the vault format:
 
 ## Tests
 
-Both suites read `tests/fixtures/vault`, a fixture checked into the repo, so no
-external vault setup is needed.
+The two suites read `tests/fixtures/vault`. This fixture vault is in the
+repository. You thus do not have to prepare an external vault.
 
 ```
 node test.js           # web: throwaway vault copy + OS-assigned port
@@ -159,7 +160,7 @@ cd tui && cargo test   # TUI: Windows native or WSL
 - No authentication, no HTTPS. The server binds to `127.0.0.1` only.
 - `archived` tickets do not show on the board. The API still returns them.
 - No file watch. The UI refreshes on focus and each 30 seconds.
-- A release build of the desktop shell has no console, so a startup failure (the port already taken, `server.js` exiting early) prints where nobody sees it. Start it from a terminal to read the reason.
+- A release build of the desktop shell has no console. If the start fails, for example because a different process holds the port or because `server.js` stops early, the shell writes the reason where you cannot see it. Start the shell from a terminal to read the reason.
 
 ## License
 

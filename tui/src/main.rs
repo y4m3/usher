@@ -98,11 +98,12 @@ impl App {
             Ok((tickets, warnings)) => {
                 self.tickets = tickets;
                 self.rebuild();
-                // Only when the operation that led here has nothing to say.
-                // Every write reloads afterwards, and this warning is about
-                // some other file: it must not replace the reason the edit the
-                // user just asked for failed. on_key clears the message at the
-                // start of each keypress, so this still shows on a plain view.
+                // Show this warning only if the operation before it has no
+                // message. Each write causes a reload, and this warning is
+                // about a different file. It must not replace the reason for
+                // the failure of the edit that the user asked for. on_key
+                // clears the message at each key press. The warning is thus
+                // still visible on a simple view of the board.
                 if let Some(first) = warnings.first()
                     && self.message.is_none()
                 {
