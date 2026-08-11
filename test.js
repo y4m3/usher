@@ -812,6 +812,32 @@ async function runTests(fakeVault, checkVault) {
     assert(!/keeps its spaces {2}/.test(after), "and the new entry does not inherit them");
   }
 
+  // A tag edit takes the ending of the `tags:` line it replaces, not the
+  // ending of the file. Same as the TUI's line_cr. Taking it from the file
+  // turned an LF block into CRLF because of one unrelated body line.
+  {
+    const file = ticketFile(fakeVault, "T-0005");
+    const lines = fs.readFileSync(file, "utf8").split("\n");
+    lines[lines.indexOf("## Summary") + 2] += "\r"; // the first summary line, now CRLF
+    const seeded = lines.join("\n");
+    fs.writeFileSync(file, seeded, "utf8");
+    // Without this the rest of the block would pass on a file that has no CRLF
+    // line at all, which is the one thing it is here to react to.
+    assert(
+      seeded.includes("\r\n") && seeded.includes("\ntags:\n"),
+      "seeded: one CRLF body line, and the tags: line still LF"
+    );
+    const res = await fetch(BASE + "/api/tickets/T-0005/fields", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tags: ["mixed-eol"] }),
+    });
+    assert(res.ok, "tag edit on a file with mixed endings succeeds");
+    const after = fs.readFileSync(file, "utf8");
+    assert(after.includes("tags:\n  - mixed-eol\n"), "the rebuilt tags block keeps the LF of the line it replaces");
+    assert(!after.includes("tags:\r\n"), "and does not take CRLF from an unrelated body line");
+  }
+
   // A file in tickets/ that is not a ticket is left off the board, rather than
   // becoming a row with every field empty. Removed again at once: checkVault
   // calls the vault broken while it is there, so every write would fail.
