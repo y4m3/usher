@@ -696,6 +696,9 @@ fn fm_get_list(fm: &[String], key: &str) -> Vec<String> {
         .collect()
 }
 
+/// Replace the value of one frontmatter line. This function replaces a line
+/// and cannot add one. The vault lint therefore requires every field line,
+/// also with an empty value.
 fn fm_set(fm: &mut [String], key: &str, value: &str) -> Result<(), String> {
     let line = fm
         .iter_mut()
@@ -1592,8 +1595,9 @@ mod tests {
                 "branch \"feature/x\" does not start with T-0042",
             ),
             // A deleted field line. The value checks only look at values, so
-            // these used to lint clean and then break the first status change:
-            // both write engines edit the line in place, neither adds one.
+            // each required line needs a case of its own. Without them such a
+            // file used to lint clean, and the first write to that field then
+            // failed: both write engines replace a line, neither adds one.
             (SAMPLE_NAME, swap("project: \n", ""), "missing project"),
             (SAMPLE_NAME, swap("repos: []\n", ""), "missing repos"),
             (SAMPLE_NAME, swap("tags: []\n", ""), "missing tags"),

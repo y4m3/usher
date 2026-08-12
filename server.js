@@ -75,7 +75,8 @@ function parseFrontmatter(text) {
   for (const line of m[1].split(/\r?\n/)) {
     const kv = line.match(/^(\w+):\s*(.*)$/);
     // If a key occurs more than one time, use the first one. The TUI parser
-    // (the Rust side) uses the same rule.
+    // (the Rust side) uses the same rule, and the vault lint reports the
+    // later occurrences as a schema violation.
     if (kv && !(kv[1] in fm)) fm[kv[1]] = kv[2].trim();
   }
   return fm;
@@ -182,6 +183,11 @@ function nowStamp() {
 
 // Replace the value of one `key: value` line in the frontmatter block. Do not
 // change any other byte in the file.
+//
+// This function replaces a line and cannot add one. The vault lint therefore
+// requires every frontmatter field line, also with an empty value: without
+// that rule a ticket with no `due:` line would pass the lint and then fail
+// here on the first write to `due`.
 function setFrontmatterField(text, key, value) {
   const m = text.match(FRONTMATTER_RE);
   if (!m) throw new Error("missing frontmatter");

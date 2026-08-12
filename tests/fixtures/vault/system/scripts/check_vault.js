@@ -12,19 +12,16 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---(?=[ \t]*\r?\n|[ \t]*$)/;
 
 // The escapes this vault actually needs from a YAML double-quoted scalar.
-// Kept identical in server.js, which unquotes the same way.
 const YAML_ESCAPES = { "\\": "\\", '"': '"', "/": "/", n: "\n", t: "\t", r: "\r", 0: "\0" };
 
 // Resolve the escapes inside the (already unwrapped) body of a double-quoted
 // scalar. An escape outside the table above is unknown: leave the backslash
 // in place rather than guess, so the value is never silently corrupted.
 //
-// \uD800-\uDFFF (the surrogate range) is also left as-is: Rust's
-// char::from_u32 rejects lone surrogates and does not compose surrogate
-// pairs, so treating a surrogate \uXXXX as unknown is the only reading both
-// front ends agree on. An astral character (above U+FFFF) still works fine
-// written literally in the file as UTF-8 — this only affects the \uXXXX
-// escape form.
+// \uD800-\uDFFF (the surrogate range) is also left as-is. This format does
+// not compose surrogate pairs, so a surrogate \uXXXX is an unknown escape. An
+// astral character (above U+FFFF) still works when it is written literally in
+// the file as UTF-8 — this only affects the \uXXXX escape form.
 function unescapeYaml(body) {
   return body.replace(/\\(?:u([0-9a-fA-F]{4})|x([0-9a-fA-F]{2})|(.))/g, (full, u, x, ch) => {
     if (u !== undefined) {
@@ -81,8 +78,8 @@ function checkVault(root) {
     for (const line of m[1].split(/\r?\n/)) {
       const kv = line.match(/^(\w+):\s*(.*)$/);
       if (!kv) continue;
-      // First key wins, same as the TUI (Rust side) parser — but a duplicate
-      // is a schema violation, not something to quietly resolve.
+      // First key wins, but a duplicate is a schema violation, not something
+      // to quietly resolve.
       if (seenKeys.has(kv[1])) err(`duplicate frontmatter key "${kv[1]}"`);
       seenKeys.add(kv[1]);
       if (!(kv[1] in fm)) fm[kv[1]] = kv[2].trim();
@@ -117,10 +114,9 @@ function checkVault(root) {
     else if (!DATE.test(created)) err(`bad created "${created}" (want YYYY-MM-DD)`);
     // Every field keeps its line, even with an empty value. id, title, status,
     // priority and created are covered above by their own value checks; these
-    // six can legitimately be empty, so only the line itself is checked. Both
-    // write engines edit a field line in place and cannot add a missing one,
-    // so a file without the line lints clean here and then fails the first
-    // status change.
+    // six can legitimately be empty, so check that the line is there. A tool
+    // that edits a ticket replaces a field line in its position and cannot add
+    // one, which is why an absent line is an error and not an empty value.
     for (const k of ["project", "repos", "tags", "due", "closed", "branch"]) {
       if (fm[k] === undefined) err(`missing ${k}`);
     }
