@@ -117,6 +117,9 @@ async function runTests(fakeVault, checkVault) {
   const t900 = list.find((t) => t.id === "T-0900"); // the CRLF fixture has tags: []
   assert(t900 && Array.isArray(t900.tags) && t900.tags.length === 0, `tags: [] parsed as empty array (got ${JSON.stringify(t900 && t900.tags)})`);
 
+  const config = await fetch(BASE + "/api/config").then((r) => r.json());
+  assert(config.doneLimit === 20, `GET /api/config returns the default done limit (got ${config.doneLimit})`);
+
   // open -> doing: only the status line changes, and one log line is added.
   {
     const file = ticketFile(fakeVault, "T-0002"); // the status is open
@@ -1015,7 +1018,7 @@ async function main() {
   fs.writeFileSync(path.join(fakeVault, "tickets", "T-0900-crlf-fixture.md"), crlfContent, "utf8");
 
   const server = spawn(process.execPath, [path.join(__dirname, "server.js"), fakeVault], {
-    env: { ...process.env, PORT: "0" }, // a free port from the OS, never the port of another process
+    env: { ...process.env, PORT: "0", USHER_DONE_LIMIT: "" }, // a free port from the OS, never the port of another process; an empty limit falls back to the default 20 that the /api/config test expects
     stdio: ["ignore", "pipe", "pipe"],
   });
   server.stderr.on("data", (d) => process.stderr.write(d));

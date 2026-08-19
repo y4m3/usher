@@ -144,12 +144,19 @@ fn draw_column(frame: &mut Frame, app: &App, index: usize, area: Rect, hidden: (
                     .fg(if focused { HEADING } else { TEXT })
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(format!("{} ", tickets.len()), Style::new().fg(TEXT_DIM)),
+            Span::styled(
+                if BOARD_STATUSES[index] == "done" && app.done_total > tickets.len() {
+                    format!("{}/{} ", tickets.len(), app.done_total)
+                } else {
+                    format!("{} ", tickets.len())
+                },
+                Style::new().fg(TEXT_DIM),
+            ),
             // The window state of the done column, like the web switch.
             Span::styled(
                 match BOARD_STATUSES[index] {
                     "done" if app.done_all => "all ",
-                    "done" => "7d ",
+                    "done" => "recent ",
                     _ => "",
                 },
                 Style::new().fg(ACCENT),

@@ -175,6 +175,9 @@ let currentSections = null;
 let modalGeneration = 0;
 let PROJECTS = [];
 let allTickets = [];
+// The server owns this value (USHER_DONE_LIMIT). The startup fetch at the end
+// of this file replaces it before the first render.
+let DONE_LIMIT = 20;
 let currentView = "board";
 let calMonth = new Date();
 calMonth.setDate(1);
@@ -248,22 +251,33 @@ function render() {
 function renderBoard(tickets) {
   const board = document.getElementById("board");
   board.innerHTML = "";
-  const doneFilter = localStorage.getItem("doneFilter") || "7d";
+  // A stored "7d" from an older version reads as "recent". No migration needed.
+  const doneFilter = localStorage.getItem("doneFilter") === "all" ? "all" : "recent";
   for (const status of COLUMNS) {
     let colTickets = tickets.filter(t => t.status === status);
-    if (status === "done" && doneFilter === "7d") {
-      const cutoff = new Date();
-      cutoff.setDate(cutoff.getDate() - 7);
-      const cutoffStr = localISODate(cutoff);
-      colTickets = colTickets.filter(t => t.closed && t.closed >= cutoffStr);
+    const total = colTickets.length;
+    if (status === "done") {
+      // Newest finish first. closed holds a date, so a same-day tie falls back
+      // to the id, which grows with time. Priority order says nothing about
+      // work that is already over.
+      colTickets.sort((a, b) => (b.closed || "").localeCompare(a.closed || "") || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+      // A count, not a time window. A time window shows nothing after a quiet
+      // week and hundreds of cards after a busy one.
+      // ponytail: "all" has no ceiling. It is a per-browser choice the user
+      // makes, and listTickets() reads every ticket file on each poll long
+      // before the DOM size hurts. Page the column if that changes.
+      if (doneFilter !== "all") colTickets = colTickets.slice(0, DONE_LIMIT);
+    } else {
+      colTickets.sort(ticketSort);
     }
-    colTickets.sort(ticketSort);
 
     const col = document.createElement("div");
     col.className = "column";
     col.dataset.status = status;
     const toggle = status === "done" ? `<button class="col-toggle" onclick="toggleDoneFilter()">${doneFilter}</button>` : "";
-    col.innerHTML = `<h2><span>${status} (${colTickets.length})</span>${toggle}</h2>`;
+    // Name the hidden ones. A bare shown-count claims the column is complete.
+    const count = colTickets.length < total ? colTickets.length + "/" + total : total;
+    col.innerHTML = `<h2><span>${status} (${count})</span>${toggle}</h2>`;
     col.addEventListener("dragover", e => { e.preventDefault(); col.classList.add("dragover"); });
     col.addEventListener("dragleave", () => col.classList.remove("dragover"));
     col.addEventListener("drop", onDrop);
@@ -275,8 +289,8 @@ function renderBoard(tickets) {
 }
 
 function toggleDoneFilter() {
-  const cur = localStorage.getItem("doneFilter") || "7d";
-  localStorage.setItem("doneFilter", cur === "7d" ? "all" : "7d");
+  const cur = localStorage.getItem("doneFilter");
+  localStorage.setItem("doneFilter", cur === "all" ? "recent" : "all");
   render();
 }
 
@@ -565,7 +579,10 @@ function escapeHtml(s) {
   return s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
 
-load();
+// Read the done limit one time, then draw the board. A failed request or a
+// malformed value keeps the default above, because a board is more useful
+// than an empty column here.
+fetch("/api/config").then(r => r.json()).then(c => { if (Number.isInteger(c.doneLimit) && c.doneLimit > 0) DONE_LIMIT = c.doneLimit; }).catch(() => {}).then(load);
 </script>
 </body>
 </html>
