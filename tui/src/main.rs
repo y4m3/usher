@@ -549,8 +549,6 @@ pub fn option_label(option: &Option<String>) -> &str {
     }
 }
 
-/// Sort by priority, then by due date, then by id. An empty due date goes last.
-/// This is the order of the web board.
 /// How many done tickets the board shows before the user asks for all of them.
 /// server.js reads the same variable, so the two boards agree. usher already
 /// configures the vault path through the environment.
@@ -562,6 +560,8 @@ fn done_limit_from_env() -> usize {
         .unwrap_or(20)
 }
 
+/// Sort by priority, then by due date, then by id. An empty due date goes last.
+/// This is the order of the web board.
 fn ticket_sort(a: &Ticket, b: &Ticket) -> std::cmp::Ordering {
     let rank = |p: &str| match p {
         "urgent" => 0,
