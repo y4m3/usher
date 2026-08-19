@@ -331,6 +331,10 @@ async function openModal(t) {
 }
 
 function closeModal() {
+  // A close also outdates the fetches in flight. Without this line, a stale
+  // response reopens the modal that the user just closed, with the ticket
+  // globals already null.
+  modalGeneration++;
   document.getElementById("modal").style.display = "none";
   currentId = null;
   currentTicket = null;
