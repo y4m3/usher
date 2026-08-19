@@ -172,6 +172,7 @@ const COLUMNS = ["open", "doing", "review", "done"];
 let currentId = null;
 let currentTicket = null;
 let currentSections = null;
+let modalGeneration = 0;
 let PROJECTS = [];
 let allTickets = [];
 let currentView = "board";
@@ -186,7 +187,7 @@ const localISODate = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStar
 
 function populateProjectSelect(selectId, selected) {
   const sel = document.getElementById(selectId);
-  sel.innerHTML = '<option value="">(none)</option>' + PROJECTS.map(p => `<option value="${p}">${p}</option>`).join("");
+  sel.innerHTML = '<option value="">(none)</option>' + PROJECTS.map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join("");
   sel.value = selected || "";
 }
 
@@ -196,8 +197,8 @@ function populateFilter(kind) {
   const sel = document.getElementById(`${kind}-filter`);
   const keep = filterInitialized[kind] ? sel.value : (localStorage.getItem(`filter.${kind}`) || "");
   const options = kind === "project"
-    ? PROJECTS.map(p => `<option value="${p}">${p}</option>`).join("") + '<option value="__none__">(no project)</option>'
-    : [...new Set(allTickets.flatMap(t => t.tags || []))].sort().map(tag => `<option value="${tag}">#${tag}</option>`).join("");
+    ? PROJECTS.map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join("") + '<option value="__none__">(no project)</option>'
+    : [...new Set(allTickets.flatMap(t => t.tags || []))].sort().map(tag => `<option value="${escapeHtml(tag)}">#${escapeHtml(tag)}</option>`).join("");
   sel.innerHTML = `<option value="">all ${kind}s</option>` + options;
   sel.value = keep;
   filterInitialized[kind] = true;
@@ -314,6 +315,7 @@ async function onDrop(e) {
 }
 
 async function openModal(t) {
+  const generation = ++modalGeneration;
   currentId = t.id;
   currentTicket = t;
   document.getElementById("modal-title").value = t.title;
@@ -326,6 +328,9 @@ async function openModal(t) {
     fetch(`/api/tickets/${t.id}`).then(r => r.text()),
     fetch(`/api/tickets/${t.id}/sections`).then(r => r.json()),
   ]);
+  // A newer openModal call started while these fetches were in flight. Discard
+  // this stale response so it does not overwrite the newer ticket's form.
+  if (generation !== modalGeneration) return;
   currentSections = sections;
   document.getElementById("modal-summary").value = sections.summary;
   document.getElementById("modal-notes").value = sections.notes;
@@ -335,6 +340,10 @@ async function openModal(t) {
 }
 
 function closeModal() {
+  // A close also outdates the fetches in flight. Without this line, a stale
+  // response reopens the modal that the user just closed, with the ticket
+  // globals already null.
+  modalGeneration++;
   document.getElementById("modal").style.display = "none";
   currentId = null;
   currentTicket = null;
