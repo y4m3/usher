@@ -46,7 +46,7 @@ usher                                    # start from anywhere
 | `m` | Add a `## Log` note |
 | `/` | Search by id or title |
 | `p` / `t` | Filter by project / tag |
-| `.` | Switch the done column between last-7-days and all |
+| `.` | Switch the done column between recent and all |
 | `a` | Show or hide a fifth column for archived tickets |
 | `Enter` | Open the detail view |
 | `r` | Reload from disk (also automatic, each 30 seconds) |

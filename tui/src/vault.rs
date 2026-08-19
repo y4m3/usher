@@ -544,7 +544,9 @@ pub fn today() -> String {
     Local::now().format("%Y-%m-%d").to_string()
 }
 
-/// `today - days`, for the window of the done column.
+/// `today - days`. The done window that needed it is gone; only the tests
+/// still make relative dates with it.
+#[cfg(test)]
 pub fn days_ago(days: i64) -> String {
     (Local::now() - chrono::Duration::days(days))
         .format("%Y-%m-%d")
