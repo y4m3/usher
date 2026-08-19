@@ -16,6 +16,14 @@ const ticketsDir = path.join(vaultRoot, "tickets");
 const projectsDir = path.join(vaultRoot, "projects");
 const checkVault = require(path.join(vaultRoot, "system/scripts/check_vault.js"));
 
+// How many done tickets the board shows before the user asks for all of them.
+// usher configures the vault path and the port through the environment. This
+// value follows that pattern, so the front ends read the same variable.
+const DONE_LIMIT = (() => {
+  const n = Number(process.env.USHER_DONE_LIMIT);
+  return Number.isInteger(n) && n > 0 ? n : 20;
+})();
+
 const STATUS = ["open", "doing", "review", "done", "archived"];
 const PRIORITY = ["urgent", "high", "normal", "low"];
 const ID_RE = /^T-\d{4}$/;
@@ -456,6 +464,10 @@ const server = http.createServer(async (req, res) => {
   try {
     if (req.method === "GET" && pathname === "/api/tickets") {
       return sendJSON(res, 200, listTickets());
+    }
+
+    if (req.method === "GET" && pathname === "/api/config") {
+      return sendJSON(res, 200, { doneLimit: DONE_LIMIT });
     }
 
     if (req.method === "GET" && pathname === "/api/projects") {

@@ -117,6 +117,9 @@ async function runTests(fakeVault, checkVault) {
   const t900 = list.find((t) => t.id === "T-0900"); // the CRLF fixture has tags: []
   assert(t900 && Array.isArray(t900.tags) && t900.tags.length === 0, `tags: [] parsed as empty array (got ${JSON.stringify(t900 && t900.tags)})`);
 
+  const config = await fetch(BASE + "/api/config").then((r) => r.json());
+  assert(config.doneLimit === 20, `GET /api/config returns the default done limit (got ${config.doneLimit})`);
+
   // open -> doing: only the status line changes, and one log line is added.
   {
     const file = ticketFile(fakeVault, "T-0002"); // the status is open

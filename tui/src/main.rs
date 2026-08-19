@@ -63,8 +63,13 @@ pub struct App {
     /// `None` = all, `Some("")` = tickets with no project.
     pub project_filter: Option<String>,
     pub tag_filter: Option<String>,
-    /// If false, the done column shows only the last 7 days.
+    /// If false, the done column shows only the newest `done_limit()` tickets.
     pub done_all: bool,
+    /// How many done tickets the column shows while `done_all` is false.
+    pub done_limit: usize,
+    /// How many done tickets exist before the limit above cuts the column.
+    /// The header names it, so the hidden ones are not a surprise.
+    pub done_total: usize,
     /// Ticket that the main loop gives to `$EDITOR` after the next draw. The key
     /// handlers cannot do this. To suspend the terminal you need the `Terminal`,
     /// and the key handlers have no access to it.
@@ -87,6 +92,8 @@ impl App {
             project_filter: None,
             tag_filter: None,
             done_all: false,
+            done_limit: done_limit_from_env(),
+            done_total: 0,
             pending_editor: None,
             last_reload: Instant::now(),
         }
@@ -124,7 +131,8 @@ impl App {
     /// Make the board columns from the tickets in memory. The filters and the
     /// done-window switch use this function. It does not read the disk.
     fn rebuild(&mut self) {
-        let cutoff = vault::days_ago(7);
+        let limit = self.done_limit;
+        let mut done_total = 0;
         self.columns = BOARD_STATUSES
             .iter()
             .map(|status| {
@@ -132,17 +140,26 @@ impl App {
                     .tickets
                     .iter()
                     .filter(|t| t.status == *status && self.matches(t))
-                    .filter(|t| {
-                        *status != "done"
-                            || self.done_all
-                            || (!t.closed.is_empty() && t.closed >= cutoff)
-                    })
                     .cloned()
                     .collect();
-                column.sort_by(ticket_sort);
+                if *status == "done" {
+                    // Newest finish first. closed holds a date, so a same-day
+                    // tie falls back to the id, which grows with time. Priority
+                    // order says nothing about work that is already over.
+                    column.sort_by(|a, b| b.closed.cmp(&a.closed).then(b.id.cmp(&a.id)));
+                    done_total = column.len();
+                    // A count, not a time window. A time window shows nothing
+                    // after a quiet week and hundreds of cards after a busy one.
+                    if !self.done_all {
+                        column.truncate(limit);
+                    }
+                } else {
+                    column.sort_by(ticket_sort);
+                }
                 column
             })
             .collect();
+        self.done_total = done_total;
         for (i, column) in self.columns.iter().enumerate() {
             self.selected[i] = self.selected[i].min(column.len().saturating_sub(1));
         }
@@ -534,6 +551,17 @@ pub fn option_label(option: &Option<String>) -> &str {
 
 /// Sort by priority, then by due date, then by id. An empty due date goes last.
 /// This is the order of the web board.
+/// How many done tickets the board shows before the user asks for all of them.
+/// server.js reads the same variable, so the two boards agree. usher already
+/// configures the vault path through the environment.
+fn done_limit_from_env() -> usize {
+    std::env::var("USHER_DONE_LIMIT")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(20)
+}
+
 fn ticket_sort(a: &Ticket, b: &Ticket) -> std::cmp::Ordering {
     let rank = |p: &str| match p {
         "urgent" => 0,
@@ -660,18 +688,29 @@ mod tests {
             ticket("T-0003", "open", "normal", "2026-01-01", ""),
             ticket("T-0004", "done", "low", "", &vault::days_ago(1)),
             ticket("T-0005", "done", "low", "", "2000-01-01"),
-            ticket("T-0006", "done", "low", "", ""),
+            ticket("T-0006", "done", "urgent", "", &vault::days_ago(1)),
         ];
         app.rebuild();
         // Urgent first. A ticket with a due date comes before a ticket without
         // one. Then id.
         assert_eq!(ids(&app.columns[0]), ["T-0002", "T-0003", "T-0001"]);
-        // The 7-day window keeps only the ticket that closed recently.
-        assert_eq!(ids(&app.columns[3]), ["T-0004"]);
+        // The done column ignores priority: the work is over. Newest finish
+        // first, and a same-day tie falls back to the id. T-0006 is urgent and
+        // still sorts on its closed date alone.
+        assert_eq!(ids(&app.columns[3]), ["T-0006", "T-0004", "T-0005"]);
+        assert_eq!(app.done_total, 3, "the total counts what the limit hides");
+
+        // The limit cuts the oldest, and the total still names all of them.
+        app.done_limit = 2;
+        app.rebuild();
+        assert_eq!(ids(&app.columns[3]), ["T-0006", "T-0004"]);
+        assert_eq!(app.done_total, 3);
 
         app.done_all = true;
         app.rebuild();
-        assert_eq!(ids(&app.columns[3]), ["T-0004", "T-0005", "T-0006"]);
+        assert_eq!(ids(&app.columns[3]), ["T-0006", "T-0004", "T-0005"]);
+        app.done_all = false;
+        app.done_limit = 20;
 
         app.search = "t-0003".to_string();
         app.rebuild();
