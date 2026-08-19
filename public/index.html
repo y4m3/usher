@@ -120,6 +120,14 @@
       <option value="normal">normal</option>
       <option value="low">low</option>
     </select>
+    <label>Status</label>
+    <select id="modal-status">
+      <option value="open">open</option>
+      <option value="doing">doing</option>
+      <option value="review">review</option>
+      <option value="done">done</option>
+      <option value="archived">archived</option>
+    </select>
     <label>Due</label>
     <input id="modal-due" type="date">
     <label>Project</label>
@@ -310,6 +318,7 @@ async function openModal(t) {
   currentTicket = t;
   document.getElementById("modal-title").value = t.title;
   document.getElementById("modal-priority").value = t.priority;
+  document.getElementById("modal-status").value = t.status;
   document.getElementById("modal-due").value = t.due || "";
   populateProjectSelect("modal-project", t.project);
   document.getElementById("modal-tags").value = (t.tags || []).join(", ");
@@ -338,6 +347,7 @@ function computeChanges() {
   const fields = {};
   const title = document.getElementById("modal-title").value.trim();
   const priority = document.getElementById("modal-priority").value;
+  const status = document.getElementById("modal-status").value;
   const due = document.getElementById("modal-due").value;
   const project = document.getElementById("modal-project").value;
   if (title !== currentTicket.title) fields.title = title;
@@ -354,8 +364,9 @@ function computeChanges() {
   if (notes !== currentSections.notes) sections.notes = notes;
 
   const note = document.getElementById("modal-note").value.trim();
-  const hasEdits = Object.keys(fields).length > 0 || Object.keys(sections).length > 0 || note !== "";
-  return { fields, sections, hasEdits };
+  const statusChanged = status !== currentTicket.status;
+  const hasEdits = Object.keys(fields).length > 0 || Object.keys(sections).length > 0 || note !== "" || statusChanged;
+  return { fields, sections, status: statusChanged ? status : null, hasEdits };
 }
 
 // Close on ESC or on a click outside the modal. Do not discard an edit that the
@@ -366,7 +377,7 @@ function tryCloseModal() {
 }
 
 async function saveTicket() {
-  const { fields, sections } = computeChanges();
+  const { fields, sections, status } = computeChanges();
   if (Object.keys(fields).length) {
     const r = await fetch(`/api/tickets/${currentId}/fields`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(fields),
@@ -376,6 +387,14 @@ async function saveTicket() {
   if (Object.keys(sections).length) {
     const r = await fetch(`/api/tickets/${currentId}/sections`, {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(sections),
+    });
+    if (!r.ok) { alert("Save failed: " + (await r.json()).error); return; }
+  }
+  // Send the status change last, so a failed field or section write does not
+  // leave the ticket half-saved with a new status.
+  if (status) {
+    const r = await fetch(`/api/tickets/${currentId}/status`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }),
     });
     if (!r.ok) { alert("Save failed: " + (await r.json()).error); return; }
   }
@@ -528,8 +547,10 @@ for (const [overlayId, tryCloseFn] of [["modal", tryCloseModal], ["new-modal", t
 }
 
 // Keep the board current, but do not replace an edit in progress.
-window.addEventListener("focus", () => { if (!isModalOpen()) load(); });
-setInterval(() => { if (!isModalOpen()) load(); }, 30000);
+// A reload during a drag would wipe the board mid-drag (render() clears
+// board.innerHTML) and silently kill the drop, so skip it while ".dragging" is set.
+window.addEventListener("focus", () => { if (!isModalOpen() && !document.querySelector(".dragging")) load(); });
+setInterval(() => { if (!isModalOpen() && !document.querySelector(".dragging")) load(); }, 30000);
 
 function escapeHtml(s) {
   return s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
