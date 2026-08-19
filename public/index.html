@@ -74,6 +74,11 @@
   .overlay .close { float: right; cursor: pointer; color: var(--muted); }
   .overlay .close:hover { color: var(--neon); }
   .overlay hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
+  #help-modal h2 { font-size: 14px; margin: 4px 0 8px; color: var(--fg-bright); }
+  #help-modal table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  #help-modal td { padding: 3px 8px 3px 0; }
+  #help-modal td:first-child { color: var(--muted); white-space: nowrap; }
+  #help-modal ul { font-size: 13px; padding-left: 18px; margin: 4px 0; }
   #calendar { display: none; padding: 16px; }
   .cal-header { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
   .cal-header button { background: var(--bg2); border: 1px solid var(--border); color: var(--fg); border-radius: 4px; padding: 2px 10px; cursor: pointer; }
@@ -98,6 +103,7 @@
   <span class="tabs">
     <button id="tab-board" class="tab active" onclick="switchView('board')">Board</button>
     <button id="tab-calendar" class="tab" onclick="switchView('calendar')">Calendar</button>
+    <button id="help-btn" class="tab" onclick="openHelpModal()">?</button>
   </span>
 </h1>
 <div class="toolbar">
@@ -159,6 +165,27 @@
   </div>
 </div>
 
+<div class="overlay" id="help-modal">
+  <div class="panel">
+    <span class="close" onclick="closeHelpModal()">&times;</span>
+    <h2>Keyboard shortcuts</h2>
+    <table>
+      <tr><td>/</td><td>Focus search</td></tr>
+      <tr><td>n</td><td>New ticket</td></tr>
+      <tr><td>?</td><td>This help</td></tr>
+      <tr><td>Esc</td><td>Close dialog / clear search</td></tr>
+    </table>
+    <hr>
+    <h2>Usage</h2>
+    <ul>
+      <li>Drag a card to another column to change its status.</li>
+      <li>Click a card to edit its fields, summary/notes, and append log entries.</li>
+      <li>The done column shows recent tickets; click its header toggle to show all.</li>
+      <li>The Calendar tab shows tickets by due date.</li>
+    </ul>
+  </div>
+</div>
+
 <script>
 const COLUMNS = ["open", "doing", "review", "done"];
 let currentId = null;
@@ -214,7 +241,9 @@ function ticketSort(a, b) {
 }
 
 function isModalOpen() {
-  return document.getElementById("modal").style.display === "block" || document.getElementById("new-modal").style.display === "block";
+  return document.getElementById("modal").style.display === "block"
+    || document.getElementById("new-modal").style.display === "block"
+    || document.getElementById("help-modal").style.display === "block";
 }
 
 // Get new data from the server. The page calls this function on load, after a
@@ -431,6 +460,14 @@ async function submitNew() {
   load();
 }
 
+function openHelpModal() {
+  document.getElementById("help-modal").style.display = "block";
+}
+
+function closeHelpModal() {
+  document.getElementById("help-modal").style.display = "none";
+}
+
 function switchView(view) {
   currentView = view;
   document.getElementById("tab-board").classList.toggle("active", view === "board");
@@ -508,6 +545,7 @@ document.addEventListener("keydown", e => {
     if (isModalOpen()) {
       if (document.getElementById("modal").style.display === "block") tryCloseModal();
       if (document.getElementById("new-modal").style.display === "block") tryCloseNewModal();
+      if (document.getElementById("help-modal").style.display === "block") closeHelpModal();
       return;
     }
     const search = document.getElementById("search");
@@ -520,8 +558,9 @@ document.addEventListener("keydown", e => {
   if (isModalOpen() || typing) return;
   if (e.key === "/") { e.preventDefault(); document.getElementById("search").focus(); }
   if (e.key === "n") { openNewModal(); }
+  if (e.key === "?") { openHelpModal(); }
 });
-for (const [overlayId, tryCloseFn] of [["modal", tryCloseModal], ["new-modal", tryCloseNewModal]]) {
+for (const [overlayId, tryCloseFn] of [["modal", tryCloseModal], ["new-modal", tryCloseNewModal], ["help-modal", closeHelpModal]]) {
   document.getElementById(overlayId).addEventListener("click", e => {
     if (e.target === e.currentTarget) tryCloseFn();
   });
