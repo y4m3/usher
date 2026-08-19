@@ -10,7 +10,7 @@ use std::path::Path;
 use ratatui::widgets::{Block, Clear, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::vault::{BOARD_STATUSES, STATUSES, Ticket};
+use crate::vault::{STATUSES, Ticket};
 use crate::{App, EDIT_FIELDS, Mode, option_label};
 
 // --- Tracer theme (dark only) ---
@@ -29,8 +29,9 @@ const NORMAL: Color = Color::Rgb(0x53, 0x9E, 0xC0);
 const LOW: Color = TEXT_DIM;
 const OVERDUE: Color = URGENT;
 
-/// Below `4 * MIN_COLUMN_WIDTH` the board shows fewer columns. It does not make
-/// the cards narrower. `h` and `l` move the window over the four statuses.
+/// Below `columns * MIN_COLUMN_WIDTH` the board shows fewer columns. It does
+/// not make the cards narrower. `h` and `l` move the window over the statuses
+/// (four, or five with `show_archived`).
 const MIN_COLUMN_WIDTH: u16 = 30;
 
 fn priority_color(priority: &str) -> Color {
@@ -47,13 +48,14 @@ pub fn draw(frame: &mut Frame, app: &App) {
     frame.render_widget(Block::new().style(Style::new().bg(BG)), area);
 
     let [board, footer] = Layout::vertical([Constraint::Min(3), Constraint::Length(1)]).areas(area);
-    let (start, count) = column_window(board.width, app.column);
+    let statuses = app.board();
+    let (start, count) = column_window(board.width, app.column, statuses.len());
     let rects = Layout::horizontal(vec![Constraint::Ratio(1, count as u32); count]).split(board);
     for (slot, rect) in rects.iter().enumerate() {
         let index = start + slot;
         let hidden = (
             slot == 0 && start > 0,
-            slot + 1 == count && index + 1 < BOARD_STATUSES.len(),
+            slot + 1 == count && index + 1 < statuses.len(),
         );
         draw_column(frame, app, index, *rect, hidden);
     }
@@ -118,12 +120,11 @@ fn filter_labels(app: &App, tag: bool) -> Vec<String> {
 }
 
 /// The columns that fit: the first column to show and the number of columns.
-/// The focused column stays visible, near the center.
-fn column_window(width: u16, focus: usize) -> (usize, usize) {
-    let count = ((width / MIN_COLUMN_WIDTH) as usize).clamp(1, BOARD_STATUSES.len());
-    let start = focus
-        .saturating_sub(count / 2)
-        .min(BOARD_STATUSES.len() - count);
+/// The focused column stays visible, near the center. `total` is the number of
+/// columns the board has right now (four, or five with `show_archived`).
+fn column_window(width: u16, focus: usize, total: usize) -> (usize, usize) {
+    let count = ((width / MIN_COLUMN_WIDTH) as usize).clamp(1, total);
+    let start = focus.saturating_sub(count / 2).min(total - count);
     (start, count)
 }
 
@@ -132,6 +133,7 @@ fn column_window(width: u16, focus: usize) -> (usize, usize) {
 fn draw_column(frame: &mut Frame, app: &App, index: usize, area: Rect, hidden: (bool, bool)) {
     let focused = app.column == index;
     let tickets = &app.columns[index];
+    let status = app.board()[index];
     let block = Block::bordered()
         .title(Line::from(vec![
             Span::styled(
@@ -139,22 +141,24 @@ fn draw_column(frame: &mut Frame, app: &App, index: usize, area: Rect, hidden: (
                 Style::new().fg(TEXT_DIM),
             ),
             Span::styled(
-                format!(" {} ", BOARD_STATUSES[index]),
+                format!(" {status} "),
                 Style::new()
                     .fg(if focused { HEADING } else { TEXT })
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                if BOARD_STATUSES[index] == "done" && app.done_total > tickets.len() {
+                if status == "done" && app.done_total > tickets.len() {
                     format!("{}/{} ", tickets.len(), app.done_total)
                 } else {
                     format!("{} ", tickets.len())
                 },
                 Style::new().fg(TEXT_DIM),
             ),
-            // The window state of the done column, like the web switch.
+            // The window state of the done column, like the web switch. The
+            // archived column has no window: its count is enough, and its
+            // presence at all already says show_archived is on.
             Span::styled(
-                match BOARD_STATUSES[index] {
+                match status {
                     "done" if app.done_all => "all ",
                     "done" => "recent ",
                     _ => "",
@@ -242,7 +246,7 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
             Line::from(vec![
                 Span::styled(spans.concat(), Style::new().bg(BG).fg(HEADING)),
                 Span::styled(
-                    " h/l j/k move  n new  e edit  s status  m note  / search  p proj  t tag  . done  enter open  r  q",
+                    " h/l j/k move  n new  e edit  s status  m note  / search  p proj  t tag  . done  a archived  enter open  r  q",
                     Style::new().bg(BG).fg(TEXT_DIM),
                 ),
             ])
@@ -380,12 +384,19 @@ mod tests {
 
     #[test]
     fn the_column_window_slides_to_keep_the_focus_visible() {
-        assert_eq!(column_window(120, 0), (0, 4));
-        assert_eq!(column_window(120, 3), (0, 4));
-        assert_eq!(column_window(100, 0), (0, 3));
-        assert_eq!(column_window(100, 3), (1, 3));
-        assert_eq!(column_window(50, 2), (2, 1));
-        assert_eq!(column_window(0, 0), (0, 1), "never zero columns");
+        assert_eq!(column_window(120, 0, 4), (0, 4));
+        assert_eq!(column_window(120, 3, 4), (0, 4));
+        assert_eq!(column_window(100, 0, 4), (0, 3));
+        assert_eq!(column_window(100, 3, 4), (1, 3));
+        assert_eq!(column_window(50, 2, 4), (2, 1));
+        assert_eq!(column_window(0, 0, 4), (0, 1), "never zero columns");
+    }
+
+    #[test]
+    fn the_column_window_grows_with_a_fifth_archived_column() {
+        assert_eq!(column_window(150, 0, 5), (0, 5));
+        assert_eq!(column_window(150, 4, 5), (0, 5));
+        assert_eq!(column_window(100, 4, 5), (2, 3));
     }
 }
 
