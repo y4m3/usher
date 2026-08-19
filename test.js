@@ -1018,7 +1018,7 @@ async function main() {
   fs.writeFileSync(path.join(fakeVault, "tickets", "T-0900-crlf-fixture.md"), crlfContent, "utf8");
 
   const server = spawn(process.execPath, [path.join(__dirname, "server.js"), fakeVault], {
-    env: { ...process.env, PORT: "0" }, // a free port from the OS, never the port of another process
+    env: { ...process.env, PORT: "0", USHER_DONE_LIMIT: "" }, // a free port from the OS, never the port of another process; an empty limit falls back to the default 20 that the /api/config test expects
     stdio: ["ignore", "pipe", "pipe"],
   });
   server.stderr.on("data", (d) => process.stderr.write(d));

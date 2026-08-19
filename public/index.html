@@ -251,7 +251,7 @@ function renderBoard(tickets) {
       // Newest finish first. closed holds a date, so a same-day tie falls back
       // to the id, which grows with time. Priority order says nothing about
       // work that is already over.
-      colTickets.sort((a, b) => (b.closed || "").localeCompare(a.closed || "") || (b.id < a.id ? -1 : 1));
+      colTickets.sort((a, b) => (b.closed || "").localeCompare(a.closed || "") || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
       // A count, not a time window. A time window shows nothing after a quiet
       // week and hundreds of cards after a busy one.
       // ponytail: "all" has no ceiling. It is a per-browser choice the user
@@ -549,9 +549,10 @@ function escapeHtml(s) {
   return s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
 
-// Read the done limit one time, then draw the board. A failed request keeps
-// the default above, because a board is more useful than an error here.
-fetch("/api/config").then(r => r.json()).then(c => { DONE_LIMIT = c.doneLimit; }).catch(() => {}).then(load);
+// Read the done limit one time, then draw the board. A failed request or a
+// malformed value keeps the default above, because a board is more useful
+// than an empty column here.
+fetch("/api/config").then(r => r.json()).then(c => { if (Number.isInteger(c.doneLimit) && c.doneLimit > 0) DONE_LIMIT = c.doneLimit; }).catch(() => {}).then(load);
 </script>
 </body>
 </html>
