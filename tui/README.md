@@ -47,6 +47,7 @@ usher                                    # start from anywhere
 | `/` | Search by id or title |
 | `p` / `t` | Filter by project / tag |
 | `.` | Switch the done column between last-7-days and all |
+| `a` | Show or hide a fifth column for archived tickets |
 | `Enter` | Open the detail view |
 | `r` | Reload from disk (also automatic, each 30 seconds) |
 | `q` | Quit |
@@ -72,8 +73,10 @@ usher lints the result against the vault schema before it writes.
 An invalid edit does not touch the file.
 To discard an edit, make the editor exit with a non-zero code (in vim: `:cq`).
 
-`archived` tickets do not show on the board.
-The `s` popup can still move a ticket to `archived`.
+`archived` tickets do not show on the board by default.
+Press `a` to add a fifth column for them, sorted newest-closed first.
+The `s` popup can move a ticket in or out of `archived`, so a ticket found in
+that column can also be un-archived from there.
 
 ## Build
 

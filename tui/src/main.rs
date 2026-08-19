@@ -49,10 +49,12 @@ pub struct App {
     vault: PathBuf,
     /// Every ticket on disk. The columns below come from this list.
     tickets: Vec<Ticket>,
-    /// One list for each entry of `BOARD_STATUSES`, filtered and sorted.
+    /// One list for each entry of `self.board()`, filtered and sorted.
     columns: Vec<Vec<Ticket>>,
     column: usize,
-    selected: [usize; BOARD_STATUSES.len()],
+    /// Sized for the largest board (`show_archived` on). `board()` decides how
+    /// many entries are in play at a given moment.
+    selected: [usize; STATUSES.len()],
     mode: Mode,
     /// The open detail view: ticket path, raw markdown, and vertical scroll
     /// offset. The detail view is an overlay, not a `Mode`. Thus an edit popup
@@ -65,6 +67,9 @@ pub struct App {
     pub tag_filter: Option<String>,
     /// If false, the done column shows only the newest `done_limit()` tickets.
     pub done_all: bool,
+    /// If true, the board shows a fifth column with archived tickets. Off by
+    /// default: an archived ticket is done with, and should not crowd the board.
+    pub show_archived: bool,
     /// How many done tickets the column shows while `done_all` is false.
     pub done_limit: usize,
     /// How many done tickets exist before the limit above cuts the column.
@@ -84,7 +89,7 @@ impl App {
             tickets: Vec::new(),
             columns: vec![Vec::new(); BOARD_STATUSES.len()],
             column: 0,
-            selected: [0; BOARD_STATUSES.len()],
+            selected: [0; STATUSES.len()],
             mode: Mode::Browse,
             detail: None,
             message: None,
@@ -92,6 +97,7 @@ impl App {
             project_filter: None,
             tag_filter: None,
             done_all: false,
+            show_archived: false,
             done_limit: done_limit_from_env(),
             done_total: 0,
             pending_editor: None,
@@ -128,12 +134,21 @@ impl App {
         }
     }
 
+    /// The statuses that make up the board's columns, in column order. Normally
+    /// the four `BOARD_STATUSES`; with `show_archived` on, all five `STATUSES`
+    /// (archived is the last entry of `STATUSES`, so it becomes the fifth
+    /// column).
+    fn board(&self) -> &'static [&'static str] {
+        if self.show_archived { &STATUSES } else { &BOARD_STATUSES }
+    }
+
     /// Make the board columns from the tickets in memory. The filters and the
     /// done-window switch use this function. It does not read the disk.
     fn rebuild(&mut self) {
         let limit = self.done_limit;
         let mut done_total = 0;
-        self.columns = BOARD_STATUSES
+        self.columns = self
+            .board()
             .iter()
             .map(|status| {
                 let mut column: Vec<Ticket> = self
@@ -153,6 +168,10 @@ impl App {
                     if !self.done_all {
                         column.truncate(limit);
                     }
+                } else if *status == "archived" {
+                    // Same order as done: the work is over, so the priority
+                    // order says nothing. Newest finish first.
+                    column.sort_by(|a, b| b.closed.cmp(&a.closed).then(b.id.cmp(&a.id)));
                 } else {
                     column.sort_by(ticket_sort);
                 }
@@ -332,7 +351,7 @@ impl App {
             KeyCode::Char('q') => return true,
             KeyCode::Left | KeyCode::Char('h') => self.column = self.column.saturating_sub(1),
             KeyCode::Right | KeyCode::Char('l') => {
-                self.column = (self.column + 1).min(BOARD_STATUSES.len() - 1)
+                self.column = (self.column + 1).min(self.board().len() - 1)
             }
             KeyCode::Up | KeyCode::Char('k') => {
                 self.selected[self.column] = self.selected[self.column].saturating_sub(1)
@@ -364,6 +383,13 @@ impl App {
             KeyCode::Char('t') => self.mode = Mode::TagFilter(self.filter_at(true)),
             KeyCode::Char('.') => {
                 self.done_all = !self.done_all;
+                self.rebuild();
+            }
+            KeyCode::Char('a') => {
+                self.show_archived = !self.show_archived;
+                // Turning the fifth column off can leave the cursor past the
+                // new last column.
+                self.column = self.column.min(self.board().len() - 1);
                 self.rebuild();
             }
             KeyCode::Enter => {
@@ -725,6 +751,37 @@ mod tests {
         app.project_filter = Some(String::new());
         app.rebuild();
         assert_eq!(app.columns[0].len(), 3, "all fixtures have no project");
+    }
+
+    #[test]
+    fn archived_column_only_appears_when_toggled_on() {
+        let mut app = App::new(PathBuf::new());
+        app.tickets = vec![
+            ticket("T-0001", "open", "normal", "", ""),
+            ticket("T-0002", "archived", "normal", "", &vault::days_ago(1)),
+            ticket("T-0003", "archived", "normal", "", "2000-01-01"),
+        ];
+        app.rebuild();
+        assert_eq!(app.columns.len(), 4, "no fifth column while show_archived is false");
+        assert!(app.columns.iter().flatten().all(|t| t.status != "archived"));
+
+        app.show_archived = true;
+        app.rebuild();
+        assert_eq!(app.columns.len(), 5);
+        // Newest finish first, like the done column.
+        assert_eq!(ids(&app.columns[4]), ["T-0002", "T-0003"]);
+    }
+
+    #[test]
+    fn the_a_key_toggles_archived_and_clamps_the_column_cursor() {
+        let mut app = App::new(PathBuf::new());
+        app.tickets = vec![ticket("T-0001", "archived", "normal", "", "2026-01-01")];
+        app.on_key(KeyCode::Char('a'));
+        assert!(app.show_archived);
+        app.column = 4;
+        app.on_key(KeyCode::Char('a'));
+        assert!(!app.show_archived);
+        assert_eq!(app.column, 3, "clamped back onto the last visible column");
     }
 
     #[test]

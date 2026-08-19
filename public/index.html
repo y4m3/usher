@@ -103,6 +103,7 @@
   <span class="tabs">
     <button id="tab-board" class="tab active" onclick="switchView('board')">Board</button>
     <button id="tab-calendar" class="tab" onclick="switchView('calendar')">Calendar</button>
+    <button id="tab-archived" class="tab" onclick="switchView('archived')">Archived</button>
     <button id="help-btn" class="tab" onclick="openHelpModal()" aria-label="Help">?</button>
   </span>
 </h1>
@@ -190,6 +191,7 @@
       <li>Click a card to edit its fields, summary/notes, and append log entries.</li>
       <li>The done column shows recent tickets; click its header toggle to show all.</li>
       <li>The Calendar tab shows tickets by due date.</li>
+      <li>The Archived tab lists archived tickets; open one and change its status to restore it.</li>
     </ul>
   </div>
 </div>
@@ -274,6 +276,7 @@ function render() {
   populateFilter("tag");
   const filtered = allTickets.filter(matchesFilters);
   if (currentView === "calendar") return renderCalendar(filtered);
+  if (currentView === "archived") return renderArchived(filtered);
   renderBoard(filtered);
 }
 
@@ -321,6 +324,22 @@ function toggleDoneFilter() {
   const cur = localStorage.getItem("doneFilter");
   localStorage.setItem("doneFilter", cur === "all" ? "recent" : "all");
   render();
+}
+
+// The only way back into an archived ticket. No drop target here: an archived
+// ticket leaves this column only through the modal's Status select.
+function renderArchived(tickets) {
+  const board = document.getElementById("board");
+  board.innerHTML = "";
+  const colTickets = tickets.filter(t => t.status === "archived")
+    .sort((a, b) => (b.closed || "").localeCompare(a.closed || "") || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+  const col = document.createElement("div");
+  col.className = "column";
+  col.innerHTML = `<h2><span>archived (${colTickets.length})</span></h2>`;
+  for (const t of colTickets) {
+    col.appendChild(renderCard(t));
+  }
+  board.appendChild(col);
 }
 
 function renderCard(t) {
@@ -514,7 +533,9 @@ function switchView(view) {
   currentView = view;
   document.getElementById("tab-board").classList.toggle("active", view === "board");
   document.getElementById("tab-calendar").classList.toggle("active", view === "calendar");
-  document.getElementById("board").style.display = view === "board" ? "flex" : "none";
+  document.getElementById("tab-archived").classList.toggle("active", view === "archived");
+  // Board and Archived are both board-like: they share the #board container.
+  document.getElementById("board").style.display = view === "calendar" ? "none" : "flex";
   document.getElementById("calendar").style.display = view === "calendar" ? "block" : "none";
   render();
 }
