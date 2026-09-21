@@ -71,11 +71,10 @@ fn node_exe() -> String {
     #[cfg(windows)]
     command.creation_flags(CREATE_NO_WINDOW);
     match command.output() {
-        Ok(out) if out.status.success() => {
-            Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
-        }
+        Ok(out) if out.status.success() => String::from_utf8(out.stdout).ok(),
         _ => None,
     }
+    .map(|p| p.trim().to_string())
     .filter(|p| !p.is_empty())
     .unwrap_or_else(|| "node".to_string())
 }
