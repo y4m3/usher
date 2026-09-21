@@ -160,7 +160,7 @@ cd tui && cargo test   # TUI: Windows native or WSL
 - No authentication, no HTTPS. The server binds to `127.0.0.1` only.
 - `archived` tickets do not show on the open/doing/review/done board. The web UI has an Archived tab for them, and the TUI has an `a` key that adds a fifth column for them. Either front end can move one back with its Status control.
 - No file watch. The UI refreshes on focus and each 30 seconds.
-- A release build of the desktop shell has no console. If the start fails, for example because a different process holds the port or because `server.js` stops early, the shell writes the reason where you cannot see it. Start the shell from a terminal to read the reason.
+- A release build of the desktop shell has no console. If the start fails, for example because no vault is found, a different process holds the port, or Node.js is missing, the shell shows the reason in a message box. The vault path comes from the first argument or `USHER_VAULT`, defaulting to `../obsidian` next to the repository.
 
 ## License
 
