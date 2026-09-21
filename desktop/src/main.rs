@@ -12,7 +12,6 @@
 // gives no reason. To show the reason there, use the Win32 MessageBoxW
 // function or a dialog crate. Add one if this becomes a problem.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-use std::ffi::OsString;
 use std::net::{TcpListener, TcpStream};
 use std::path::Path;
 use std::process::{Child, Command};
@@ -66,18 +65,19 @@ fn wait_for_port(child: &mut Child, port: u16, timeout: Duration) -> Result<(), 
 /// ponytail: this resolver call itself still goes through the shim, so on
 /// Windows a console may flash briefly once at startup. A Win32 job object
 /// would remove even that; add one if the flash becomes a problem.
-fn node_exe() -> OsString {
+fn node_exe() -> String {
     let mut command = Command::new("node");
     command.args(["-p", "process.execPath"]);
     #[cfg(windows)]
     command.creation_flags(CREATE_NO_WINDOW);
     match command.output() {
         Ok(out) if out.status.success() => {
-            let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            if path.is_empty() { "node".into() } else { path.into() }
+            Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
         }
-        _ => "node".into(),
+        _ => None,
     }
+    .filter(|p| !p.is_empty())
+    .unwrap_or_else(|| "node".to_string())
 }
 
 fn main() {
