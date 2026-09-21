@@ -649,12 +649,20 @@ fn run_editor(
     let editor = std::env::var("EDITOR").unwrap_or_else(|_| fallback.to_string());
     let _ = terminal::disable_raw_mode();
     let _ = execute!(std::io::stdout(), terminal::LeaveAlternateScreen);
-    let status = std::process::Command::new(&editor).arg(&scratch).status();
+    // $EDITOR may carry arguments, e.g. `code --wait`; split on whitespace so the
+    // first word is the program and the rest are args.
+    // ponytail: no shell-style quoting support, add if a path with spaces in $EDITOR shows up.
+    let mut words = editor.split_whitespace();
+    let program = words.next().unwrap_or(fallback);
+    let status = std::process::Command::new(program)
+        .args(words)
+        .arg(&scratch)
+        .status();
     let _ = execute!(std::io::stdout(), terminal::EnterAlternateScreen);
     let _ = terminal::enable_raw_mode();
     let _ = terminal.clear();
     // A non-zero editor exit means: discard this edit. In vim, `:cq` does this.
-    if !status.map_err(|e| format!("{editor}: {e}"))?.success() {
+    if !status.map_err(|e| format!("{program}: {e}"))?.success() {
         let _ = std::fs::remove_file(&scratch);
         return Err("editor exited nonzero, edit discarded".to_string());
     }

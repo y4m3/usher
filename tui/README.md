@@ -67,6 +67,8 @@ An arrow (`◂` / `▸`) in a column title points to hidden columns.
 ## The editor
 
 A full-ticket edit stops the TUI and opens `$EDITOR`.
+`$EDITOR` may include arguments, for example `code --wait`.
+The value is split on whitespace, so quoting is not supported and an editor program path containing spaces will not work correctly.
 If `$EDITOR` is not set, usher opens `notepad` on Windows and `vi` on other systems.
 Save the file and close the editor to apply the edit.
 usher lints the result against the vault schema before it writes.
