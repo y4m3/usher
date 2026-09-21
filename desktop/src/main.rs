@@ -54,6 +54,31 @@ fn wait_for_port(child: &mut Child, port: u16, timeout: Duration) -> Result<(), 
     ))
 }
 
+/// The path of the real Node binary. A version manager (mise, volta, fnm,
+/// nvm-windows) puts a shim named `node` on PATH. On Windows the shim does
+/// not exec: it starts the real node as a grandchild. `kill()` on the shim
+/// then leaves node running with the port, `try_wait()` watches the wrong
+/// process, and the grandchild opens its own console window. Asking node
+/// for its own path once makes the real binary the direct child.
+/// Falls back to "node" so the spawn error message below still applies.
+///
+/// ponytail: this resolver call itself still goes through the shim, so on
+/// Windows a console may flash briefly once at startup. A Win32 job object
+/// would remove even that; add one if the flash becomes a problem.
+fn node_exe() -> String {
+    let mut command = Command::new("node");
+    command.args(["-p", "process.execPath"]);
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
+    match command.output() {
+        Ok(out) if out.status.success() => String::from_utf8(out.stdout).ok(),
+        _ => None,
+    }
+    .map(|p| p.trim().to_string())
+    .filter(|p| !p.is_empty())
+    .unwrap_or_else(|| "node".to_string())
+}
+
 fn main() {
     // server.js is at the repository root, one directory above this crate.
     let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -82,7 +107,7 @@ fn main() {
         }
     }
 
-    let mut command = Command::new("node");
+    let mut command = Command::new(node_exe());
     command.arg("server.js").current_dir(repo_root);
     // Give the vault argument of the shell to the child. The desktop shell
     // then finds the vault in the same order as the other two front ends.
