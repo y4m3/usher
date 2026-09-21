@@ -6,11 +6,9 @@
 // shell a console. The console then stays on the screen behind the window.
 // A debug build keeps the console, because the log messages go to it.
 //
-// ponytail: the attribute has a cost. Only a user who starts the exe from a
-// terminal can read the messages below. If the user starts a release build
-// from Explorer or from a shortcut, the window does not open and the shell
-// gives no reason. To show the reason there, use the Win32 MessageBoxW
-// function or a dialog crate. Add one if this becomes a problem.
+// The attribute has a cost: a release build has no console, so eprintln!
+// alone is invisible to a user who starts the exe from Explorer or a
+// shortcut. `fail` below also shows startup errors in a Win32 message box.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 use std::net::{TcpListener, TcpStream};
 use std::path::Path;
@@ -79,6 +77,26 @@ fn node_exe() -> String {
     .unwrap_or_else(|| "node".to_string())
 }
 
+/// Report a startup error and exit. A release build has no console, so
+/// eprintln! alone is invisible. On Windows also show a message box.
+fn fail(msg: &str) -> ! {
+    eprintln!("{msg}");
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        #[link(name = "user32")]
+        extern "system" {
+            fn MessageBoxW(hwnd: *mut std::ffi::c_void, text: *const u16, caption: *const u16, utype: u32) -> i32;
+        }
+        let wide = |s: &str| std::ffi::OsStr::new(s).encode_wide().chain(Some(0)).collect::<Vec<u16>>();
+        let (text, caption) = (wide(msg), wide("usher"));
+        const MB_ICONERROR: u32 = 0x10;
+        // SAFETY: both buffers are NUL-terminated and outlive the call.
+        unsafe { MessageBoxW(std::ptr::null_mut(), text.as_ptr(), caption.as_ptr(), MB_ICONERROR) };
+    }
+    std::process::exit(1);
+}
+
 fn main() {
     // server.js is at the repository root, one directory above this crate.
     let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -97,28 +115,47 @@ fn main() {
     // then not bind its own socket.
     match TcpListener::bind(("127.0.0.1", PORT)) {
         Ok(listener) => drop(listener),
-        Err(err) => {
-            eprintln!(
-                "usher: port {PORT} is already in use ({err}).\n\
-                 Another usher instance (or something else) is already listening on \
-                 127.0.0.1:{PORT}. Stop it and try again."
-            );
-            std::process::exit(1);
-        }
+        Err(err) => fail(&format!(
+            "usher: port {PORT} is already in use ({err}).\n\
+             Another usher instance (or something else) is already listening on \
+             127.0.0.1:{PORT}. Stop it and try again."
+        )),
+    }
+
+    // Resolve the vault path the same way server.js does: the first CLI
+    // argument (made absolute against the current directory), else
+    // USHER_VAULT or ../obsidian, both relative to the repository like
+    // server.js does (it resolves against __dirname, not its cwd). Computed
+    // once so the pre-flight check below and the argument passed to the
+    // child agree. The working directory of the child is repo_root. Thus
+    // make a relative CLI path absolute here. If you do not, the child
+    // finds the path from the repository, and not from the directory of
+    // the user.
+    let cli_vault = std::env::args_os().nth(1).map(|vault| match std::env::current_dir() {
+        Ok(cwd) => cwd.join(vault),
+        Err(_) => std::path::PathBuf::from(vault),
+    });
+    let vault_path = cli_vault
+        .clone()
+        .unwrap_or_else(|| repo_root.join(std::env::var_os("USHER_VAULT").unwrap_or_else(|| "../obsidian".into())));
+    if !vault_path.join("system/scripts/check_vault.js").is_file() {
+        fail(&format!(
+            "usher: no vault at {}\n\
+             (system/scripts/check_vault.js is missing there).\n\n\
+             Pass the vault path as the first argument, or set USHER_VAULT.\n\
+             The default is ../obsidian next to the usher repository.",
+            vault_path.display()
+        ));
     }
 
     let mut command = Command::new(node_exe());
     command.arg("server.js").current_dir(repo_root);
     // Give the vault argument of the shell to the child. The desktop shell
     // then finds the vault in the same order as the other two front ends.
-    // The working directory of the child is repo_root. Thus make a relative
-    // path absolute here. If you do not, the child finds the path from the
-    // repository, and not from the directory of the user.
-    if let Some(vault) = std::env::args_os().nth(1) {
-        match std::env::current_dir() {
-            Ok(cwd) => command.arg(cwd.join(vault)),
-            Err(_) => command.arg(vault),
-        };
+    // When no argument was given, pass nothing through: server.js resolves
+    // USHER_VAULT and the default itself.
+    if let Some(vault) = cli_vault {
+        command.arg(vault);
     }
     // server.js reads the PORT variable. The url in tauri.conf.json and
     // wait_for_port below always use 3000. Thus set PORT for the child, and
@@ -127,15 +164,18 @@ fn main() {
     #[cfg(windows)]
     command.creation_flags(CREATE_NO_WINDOW);
 
-    let mut child: Child = command
-        .spawn()
-        .expect("failed to spawn `node server.js` -- is Node.js on PATH?");
+    let mut child: Child = command.spawn().unwrap_or_else(|err| {
+        fail(&format!(
+            "usher: failed to spawn node server.js ({err}). Is Node.js installed and on PATH?"
+        ))
+    });
 
     // ponytail: a fixed poll of 5 seconds with a 100 ms step. There is no
     // setting for it. Make the values larger if a slow machine needs more time.
     if let Err(msg) = wait_for_port(&mut child, PORT, Duration::from_secs(5)) {
-        eprintln!("{msg}\nCheck that the vault exists (default: ../obsidian, or set USHER_VAULT).");
-        std::process::exit(1);
+        fail(&format!(
+            "{msg}\nCheck that the vault exists (default: ../obsidian, or set USHER_VAULT)."
+        ));
     }
 
     let mut child = Some(child);
