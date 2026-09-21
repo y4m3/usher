@@ -12,6 +12,7 @@
 // gives no reason. To show the reason there, use the Win32 MessageBoxW
 // function or a dialog crate. Add one if this becomes a problem.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+use std::ffi::OsString;
 use std::net::{TcpListener, TcpStream};
 use std::path::Path;
 use std::process::{Child, Command};
@@ -54,6 +55,31 @@ fn wait_for_port(child: &mut Child, port: u16, timeout: Duration) -> Result<(), 
     ))
 }
 
+/// The path of the real Node binary. A version manager (mise, volta, fnm,
+/// nvm-windows) puts a shim named `node` on PATH. On Windows the shim does
+/// not exec: it starts the real node as a grandchild. `kill()` on the shim
+/// then leaves node running with the port, `try_wait()` watches the wrong
+/// process, and the grandchild opens its own console window. Asking node
+/// for its own path once makes the real binary the direct child.
+/// Falls back to "node" so the spawn error message below still applies.
+///
+/// ponytail: this resolver call itself still goes through the shim, so on
+/// Windows a console may flash briefly once at startup. A Win32 job object
+/// would remove even that; add one if the flash becomes a problem.
+fn node_exe() -> OsString {
+    let mut command = Command::new("node");
+    command.args(["-p", "process.execPath"]);
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
+    match command.output() {
+        Ok(out) if out.status.success() => {
+            let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if path.is_empty() { "node".into() } else { path.into() }
+        }
+        _ => "node".into(),
+    }
+}
+
 fn main() {
     // server.js is at the repository root, one directory above this crate.
     let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -82,7 +108,7 @@ fn main() {
         }
     }
 
-    let mut command = Command::new("node");
+    let mut command = Command::new(node_exe());
     command.arg("server.js").current_dir(repo_root);
     // Give the vault argument of the shell to the child. The desktop shell
     // then finds the vault in the same order as the other two front ends.
