@@ -662,7 +662,7 @@ fn run_editor(
     let _ = terminal::enable_raw_mode();
     let _ = terminal.clear();
     // A non-zero editor exit means: discard this edit. In vim, `:cq` does this.
-    if !status.map_err(|e| format!("{editor}: {e}"))?.success() {
+    if !status.map_err(|e| format!("{program}: {e}"))?.success() {
         let _ = std::fs::remove_file(&scratch);
         return Err("editor exited nonzero, edit discarded".to_string());
     }
