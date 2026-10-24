@@ -345,8 +345,29 @@ async function runTests(fakeVault, checkVault) {
   {
     const list = await fetch(BASE + "/api/projects").then((r) => r.json());
     assert(
-      JSON.stringify(list) === JSON.stringify(["folder-note-demo", "vault-bootstrap"]),
+      JSON.stringify([...list].sort()) === JSON.stringify(["folder-note-demo", "vault-bootstrap"]),
       `GET /api/projects lists folder-note and flat projects only (got ${JSON.stringify(list)})`
+    );
+    // Only vault-bootstrap has tickets, so it comes before the unused project.
+    assert(
+      JSON.stringify(list) === JSON.stringify(["vault-bootstrap", "folder-note-demo"]),
+      `GET /api/projects puts a used project before an unused one (got ${JSON.stringify(list)})`
+    );
+  }
+
+  // The project of the newest ticket comes first, so the project pickers open
+  // on what the user touched last. Unused projects follow by name.
+  {
+    const res = await fetch(BASE + "/api/tickets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Recency ticket", project: "folder-note-demo" }),
+    });
+    assert(res.ok, "recency: creating a ticket in folder-note-demo succeeds");
+    const list = await fetch(BASE + "/api/projects").then((r) => r.json());
+    assert(
+      JSON.stringify(list) === JSON.stringify(["folder-note-demo", "vault-bootstrap"]),
+      `GET /api/projects orders by newest referencing ticket id (got ${JSON.stringify(list)})`
     );
   }
 

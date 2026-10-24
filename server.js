@@ -164,6 +164,20 @@ function listProjects() {
   }).sort();
 }
 
+// The order for the project pickers: the project of the newest ticket first.
+// Ticket ids grow with time, so the biggest referencing id means "used last".
+// Archived and done tickets count too. A project with no ticket goes after the
+// used ones, by name. listProjects() keeps its plain order for projectExists.
+function listProjectsByRecency() {
+  const newest = new Map();
+  for (const t of listTickets()) {
+    const m = /^T-(\d+)/.exec(t.id || "");
+    if (!t.project || !m) continue;
+    newest.set(t.project, Math.max(newest.get(t.project) || 0, parseInt(m[1], 10)));
+  }
+  return listProjects().sort((a, b) => (newest.get(b) || 0) - (newest.get(a) || 0) || (a < b ? -1 : a > b ? 1 : 0));
+}
+
 // This function compares the name with the list. It does not make a path from
 // the name. Thus a name that contains a separator or ".." cannot point to a
 // file outside projects/.
@@ -471,7 +485,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && pathname === "/api/projects") {
-      return sendJSON(res, 200, listProjects());
+      return sendJSON(res, 200, listProjectsByRecency());
     }
 
     if (req.method === "POST" && pathname === "/api/tickets") {
