@@ -69,6 +69,10 @@
     color: var(--fg); border-radius: 4px; font-family: inherit; font-size: 14px; padding: 5px 7px;
   }
   .overlay textarea { height: 60px; }
+  /* The default picker icon is dark and vanishes on --bg-alt. Invert it instead of
+     setting color-scheme: dark, which would restyle every other native control. */
+  .overlay input[type=date]::-webkit-calendar-picker-indicator { filter: invert(1); opacity: .75; cursor: pointer; }
+  .overlay input[type=date]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
   .overlay input:focus, .overlay select:focus, .overlay textarea:focus { outline: none; border-color: var(--border-hi); }
   .overlay button { margin-top: 10px; background: var(--green); color: var(--on-accent); border: none; border-radius: 4px; padding: 6px 12px; cursor: pointer; }
   .overlay button:hover { background: var(--neon-hover); }
