@@ -100,6 +100,18 @@
   .cal-card.prio-normal { border-left-color: var(--blue); }
   .cal-card.prio-low { border-left-color: var(--muted); }
   .cal-card.overdue { border-left-color: var(--red); color: var(--red); }
+  #table { display: none; padding: 16px; }
+  .tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .tbl th, .tbl td { padding: 3px 10px; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--border); }
+  .tbl td.title { white-space: normal; color: var(--fg-bright); }
+  .tbl th { position: sticky; top: 0; z-index: 1; background: var(--bg-alt); color: var(--muted); font-size: 11px; text-transform: uppercase; cursor: pointer; user-select: none; box-shadow: 0 1px 0 var(--border-hi); }
+  .tbl th:hover { color: var(--fg); }
+  .tbl th.sorted { color: var(--neon); }
+  .tbl tbody tr { cursor: pointer; }
+  .tbl tbody tr:hover { background: var(--bg2); }
+  .tbl td.id { color: var(--muted); }
+  .tbl td.overdue { color: var(--red); }
+  .tbl .empty { color: var(--muted); text-align: center; padding: 16px; cursor: default; }
   ::selection { background: var(--selection); }
 </style>
 </head>
@@ -109,6 +121,7 @@
   <span class="tabs">
     <button id="tab-board" class="tab active" onclick="switchView('board')">Board</button>
     <button id="tab-calendar" class="tab" onclick="switchView('calendar')">Calendar</button>
+    <button id="tab-table" class="tab" onclick="switchView('table')">Table</button>
     <button id="tab-archived" class="tab" onclick="switchView('archived')">Archived</button>
     <button id="help-btn" class="tab" onclick="openHelpModal()" aria-label="Help">?</button>
   </span>
@@ -121,6 +134,7 @@
 </div>
 <div class="board" id="board"></div>
 <div id="calendar"></div>
+<div id="table"></div>
 
 <div class="overlay" id="modal">
   <div class="panel">
@@ -199,6 +213,7 @@
       <li>The done column shows recent tickets; click its header toggle to show all.</li>
       <li>The Calendar tab shows tickets by due date.</li>
       <li>Hide done removes the done column and done tickets from the Calendar view. The Archived tab is not affected.</li>
+      <li>The Table tab lists tickets in sortable columns; click a header to sort, click again to reverse.</li>
       <li>The Archived tab lists archived tickets; open one and change its status to restore it.</li>
     </ul>
   </div>
@@ -289,6 +304,7 @@ function render() {
   const filtered = allTickets.filter(matchesFilters);
   if (currentView === "calendar") return renderCalendar(filtered);
   if (currentView === "archived") return renderArchived(filtered);
+  if (currentView === "table") return renderTable(filtered);
   renderBoard(filtered);
 }
 
@@ -546,11 +562,95 @@ function switchView(view) {
   currentView = view;
   document.getElementById("tab-board").classList.toggle("active", view === "board");
   document.getElementById("tab-calendar").classList.toggle("active", view === "calendar");
+  document.getElementById("tab-table").classList.toggle("active", view === "table");
   document.getElementById("tab-archived").classList.toggle("active", view === "archived");
   // Board and Archived are both board-like: they share the #board container.
-  document.getElementById("board").style.display = view === "calendar" ? "none" : "flex";
+  document.getElementById("board").style.display = view === "calendar" || view === "table" ? "none" : "flex";
+  document.getElementById("table").style.display = view === "table" ? "block" : "none";
   document.getElementById("calendar").style.display = view === "calendar" ? "block" : "none";
   render();
+}
+
+const TABLE_COLUMNS = [
+  { key: "id", label: "ID" },
+  { key: "title", label: "Title" },
+  { key: "status", label: "Status" },
+  { key: "priority", label: "Priority" },
+  { key: "due", label: "Due" },
+  { key: "project", label: "Project" },
+  { key: "tags", label: "Tags" },
+  { key: "closed", label: "Closed" },
+];
+// The default is the board order: priority, then due, then id (see ticketSort).
+const DEFAULT_TABLE_SORT = { key: "priority", dir: "asc" };
+
+function loadTableSort() {
+  try {
+    const s = JSON.parse(localStorage.getItem("tableSort"));
+    if (s && TABLE_COLUMNS.some(c => c.key === s.key) && (s.dir === "asc" || s.dir === "desc")) return s;
+  } catch (e) {}
+  return DEFAULT_TABLE_SORT;
+}
+
+// A sort key per column. A blank value is null, and it goes last in both
+// directions, so a reverse sort does not put hundreds of empty dates on top.
+function tableSortValue(t, key) {
+  switch (key) {
+    case "priority": return PRIORITY_RANK[t.priority];
+    case "status": return [...COLUMNS, "archived"].indexOf(t.status);
+    case "tags": return (t.tags || []).join(",").toLowerCase() || null;
+    case "title": return t.title.toLowerCase();
+    default: return t[key] || null;
+  }
+}
+
+function sortTableRows(tickets, { key, dir }) {
+  const sign = dir === "desc" ? -1 : 1;
+  return [...tickets].sort((a, b) => {
+    const av = tableSortValue(a, key), bv = tableSortValue(b, key);
+    if (av === null || bv === null) {
+      if (av !== bv) return av === null ? 1 : -1;
+    } else if (av !== bv) {
+      return (av < bv ? -1 : 1) * sign;
+    }
+    return ticketSort(a, b);
+  });
+}
+
+function setTableSort(key) {
+  const cur = loadTableSort();
+  const next = { key, dir: cur.key === key && cur.dir === "asc" ? "desc" : "asc" };
+  localStorage.setItem("tableSort", JSON.stringify(next));
+  render();
+}
+
+function renderTable(tickets) {
+  const sort = loadTableSort();
+  const todayStr = localISODate(new Date());
+  // Archived tickets have their own tab.
+  const rows = sortTableRows(tickets.filter(t => t.status !== "archived"), sort);
+  const arrow = sort.dir === "asc" ? " \u25B2" : " \u25BC";
+  const head = TABLE_COLUMNS.map(c =>
+    `<th class="${c.key === sort.key ? "sorted" : ""}" onclick="setTableSort('${c.key}')">${c.label}${c.key === sort.key ? arrow : ""}</th>`).join("");
+  const table = document.getElementById("table");
+  table.innerHTML = `<table class="tbl"><thead><tr>${head}</tr></thead><tbody></tbody></table>`;
+  const body = table.querySelector("tbody");
+  if (!rows.length) body.innerHTML = `<tr><td class="empty" colspan="${TABLE_COLUMNS.length}">No tickets</td></tr>`;
+  for (const t of rows) {
+    const overdue = t.due && t.due < todayStr && t.status !== "done";
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="id">${t.id}</td>
+      <td class="title">${escapeHtml(t.title)}</td>
+      <td>${t.status}</td>
+      <td><span class="prio prio-${t.priority}">${t.priority}</span></td>
+      <td class="${overdue ? "overdue" : ""}">${t.due || ""}</td>
+      <td>${escapeHtml(t.project || "")}</td>
+      <td>${(t.tags || []).map(tag => `<span class="tag-chip">#${escapeHtml(tag)}</span>`).join("")}</td>
+      <td>${t.closed || ""}</td>`;
+    tr.addEventListener("click", () => openModal(t));
+    body.appendChild(tr);
+  }
 }
 
 function changeMonth(delta) {
