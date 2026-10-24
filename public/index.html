@@ -39,6 +39,8 @@
   .toolbar input, .toolbar select { background: var(--bg2); border: 1px solid var(--border); color: var(--fg); border-radius: 4px; padding: 4px 8px; font-family: inherit; font-size: 13px; }
   .toolbar input { flex: 1; max-width: 300px; }
   .toolbar input:focus, .toolbar select:focus { outline: none; border-color: var(--border-hi); }
+  .toolbar .check { display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--fg); cursor: pointer; user-select: none; }
+  .toolbar .check input { flex: none; margin: 0; accent-color: var(--green); cursor: pointer; }
   .board { display: flex; gap: 12px; padding: 16px; align-items: flex-start; }
   .column { flex: 1; background: var(--bg-alt); border: 1px solid var(--border); border-radius: 6px; padding: 8px; min-height: 60vh; }
   .column h2 { font-size: 13px; text-transform: uppercase; margin: 4px 8px 8px; color: var(--muted); display: flex; align-items: center; justify-content: space-between; }
@@ -111,6 +113,7 @@
   <input id="search" placeholder="Search id or title... ( / )">
   <select id="project-filter"></select>
   <select id="tag-filter"></select>
+  <label class="check"><input id="hide-done" type="checkbox"> Hide done</label>
 </div>
 <div class="board" id="board"></div>
 <div id="calendar"></div>
@@ -191,6 +194,7 @@
       <li>Click a card to edit its fields, summary/notes, and append log entries.</li>
       <li>The done column shows recent tickets; click its header toggle to show all.</li>
       <li>The Calendar tab shows tickets by due date.</li>
+      <li>Hide done removes the done column and done tickets from the Calendar view. The Archived tab is not affected.</li>
       <li>The Archived tab lists archived tickets; open one and change its status to restore it.</li>
     </ul>
   </div>
@@ -236,7 +240,11 @@ function populateFilter(kind) {
   filterInitialized[kind] = true;
 }
 
+// Kept in localStorage like the other filters, so a reload keeps the choice.
+const hideDone = () => localStorage.getItem("hideDone") === "1";
+
 function matchesFilters(t) {
+  if (hideDone() && t.status === "done") return false;
   const q = document.getElementById("search").value.trim().toLowerCase();
   if (q && !(t.id.toLowerCase().includes(q) || t.title.toLowerCase().includes(q))) return false;
   const pf = document.getElementById("project-filter").value;
@@ -285,7 +293,8 @@ function renderBoard(tickets) {
   board.innerHTML = "";
   // A stored "7d" from an older version reads as "recent". No migration needed.
   const doneFilter = localStorage.getItem("doneFilter") === "all" ? "all" : "recent";
-  for (const status of COLUMNS) {
+  // No empty done column: the other three columns take its width.
+  for (const status of hideDone() ? COLUMNS.filter(s => s !== "done") : COLUMNS) {
     let colTickets = tickets.filter(t => t.status === status);
     const total = colTickets.length;
     if (status === "done") {
@@ -594,6 +603,11 @@ function renderCalendar(tickets) {
 }
 
 document.getElementById("search").addEventListener("input", render);
+document.getElementById("hide-done").checked = hideDone();
+document.getElementById("hide-done").addEventListener("change", e => {
+  localStorage.setItem("hideDone", e.target.checked ? "1" : "0");
+  render();
+});
 document.getElementById("project-filter").addEventListener("change", () => {
   localStorage.setItem("filter.project", document.getElementById("project-filter").value);
   render();
