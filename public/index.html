@@ -39,6 +39,8 @@
   .toolbar input, .toolbar select { background: var(--bg2); border: 1px solid var(--border); color: var(--fg); border-radius: 4px; padding: 4px 8px; font-family: inherit; font-size: 13px; }
   .toolbar input { flex: 1; max-width: 300px; }
   .toolbar input:focus, .toolbar select:focus { outline: none; border-color: var(--border-hi); }
+  .toolbar .check { display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--fg); cursor: pointer; user-select: none; }
+  .toolbar .check input { flex: none; margin: 0; accent-color: var(--green); cursor: pointer; }
   .board { display: flex; gap: 12px; padding: 16px; align-items: flex-start; }
   .column { flex: 1; background: var(--bg-alt); border: 1px solid var(--border); border-radius: 6px; padding: 8px; min-height: 60vh; }
   .column h2 { font-size: 13px; text-transform: uppercase; margin: 4px 8px 8px; color: var(--muted); display: flex; align-items: center; justify-content: space-between; }
@@ -58,7 +60,8 @@
   .prio-normal { background: var(--blue); }
   .prio-low { background: var(--muted); }
   .column.dragover { outline: 2px dashed var(--green); }
-  .overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.6); }
+  /* Above the sticky table header, which needs its own z-index. */
+  .overlay { display: none; position: fixed; inset: 0; z-index: 10; background: rgba(0,0,0,.6); }
   .overlay .panel { background: var(--bg2); border: 1px solid var(--border); max-width: 640px; margin: 5vh auto; padding: 16px; border-radius: 6px; max-height: 85vh; overflow: auto; color: var(--fg); }
   .overlay pre { white-space: pre-wrap; font-size: 13px; background: var(--bg-alt); border: 1px solid var(--border); padding: 8px; border-radius: 4px; color: var(--fg); }
   .overlay label { display: block; font-size: 11px; color: var(--muted); text-transform: uppercase; margin: 8px 0 2px; }
@@ -67,6 +70,10 @@
     color: var(--fg); border-radius: 4px; font-family: inherit; font-size: 14px; padding: 5px 7px;
   }
   .overlay textarea { height: 60px; }
+  /* The default picker icon is dark and vanishes on --bg-alt. Invert it instead of
+     setting color-scheme: dark, which would restyle every other native control. */
+  .overlay input[type=date]::-webkit-calendar-picker-indicator { filter: invert(1); opacity: .75; cursor: pointer; }
+  .overlay input[type=date]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
   .overlay input:focus, .overlay select:focus, .overlay textarea:focus { outline: none; border-color: var(--border-hi); }
   .overlay button { margin-top: 10px; background: var(--green); color: var(--on-accent); border: none; border-radius: 4px; padding: 6px 12px; cursor: pointer; }
   .overlay button:hover { background: var(--neon-hover); }
@@ -94,6 +101,18 @@
   .cal-card.prio-normal { border-left-color: var(--blue); }
   .cal-card.prio-low { border-left-color: var(--muted); }
   .cal-card.overdue { border-left-color: var(--red); color: var(--red); }
+  #table { display: none; padding: 16px; }
+  .tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .tbl th, .tbl td { padding: 3px 10px; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--border); }
+  .tbl td.title { white-space: normal; color: var(--fg-bright); }
+  .tbl th { position: sticky; top: 0; z-index: 1; background: var(--bg-alt); color: var(--muted); font-size: 11px; text-transform: uppercase; cursor: pointer; user-select: none; box-shadow: 0 1px 0 var(--border-hi); }
+  .tbl th:hover { color: var(--fg); }
+  .tbl th.sorted { color: var(--neon); }
+  .tbl tbody tr { cursor: pointer; }
+  .tbl tbody tr:hover { background: var(--bg2); }
+  .tbl td.id { color: var(--muted); }
+  .tbl td.overdue { color: var(--red); }
+  .tbl .empty { color: var(--muted); text-align: center; padding: 16px; cursor: default; }
   ::selection { background: var(--selection); }
 </style>
 </head>
@@ -103,6 +122,7 @@
   <span class="tabs">
     <button id="tab-board" class="tab active" onclick="switchView('board')">Board</button>
     <button id="tab-calendar" class="tab" onclick="switchView('calendar')">Calendar</button>
+    <button id="tab-table" class="tab" onclick="switchView('table')">Table</button>
     <button id="tab-archived" class="tab" onclick="switchView('archived')">Archived</button>
     <button id="help-btn" class="tab" onclick="openHelpModal()" aria-label="Help">?</button>
   </span>
@@ -111,9 +131,11 @@
   <input id="search" placeholder="Search id or title... ( / )">
   <select id="project-filter"></select>
   <select id="tag-filter"></select>
+  <label class="check"><input id="hide-done" type="checkbox"> Hide done</label>
 </div>
 <div class="board" id="board"></div>
 <div id="calendar"></div>
+<div id="table"></div>
 
 <div class="overlay" id="modal">
   <div class="panel">
@@ -191,6 +213,8 @@
       <li>Click a card to edit its fields, summary/notes, and append log entries.</li>
       <li>The done column shows recent tickets; click its header toggle to show all.</li>
       <li>The Calendar tab shows tickets by due date.</li>
+      <li>Hide done removes the done column and done tickets from the Calendar and Table views. The Archived tab is not affected.</li>
+      <li>The Table tab lists tickets in sortable columns; click a header to sort, click again to reverse.</li>
       <li>The Archived tab lists archived tickets; open one and change its status to restore it.</li>
     </ul>
   </div>
@@ -236,7 +260,11 @@ function populateFilter(kind) {
   filterInitialized[kind] = true;
 }
 
+// Kept in localStorage like the other filters, so a reload keeps the choice.
+const hideDone = () => localStorage.getItem("hideDone") === "1";
+
 function matchesFilters(t) {
+  if (hideDone() && t.status === "done") return false;
   const q = document.getElementById("search").value.trim().toLowerCase();
   if (q && !(t.id.toLowerCase().includes(q) || t.title.toLowerCase().includes(q))) return false;
   const pf = document.getElementById("project-filter").value;
@@ -277,6 +305,7 @@ function render() {
   const filtered = allTickets.filter(matchesFilters);
   if (currentView === "calendar") return renderCalendar(filtered);
   if (currentView === "archived") return renderArchived(filtered);
+  if (currentView === "table") return renderTable(filtered);
   renderBoard(filtered);
 }
 
@@ -285,7 +314,8 @@ function renderBoard(tickets) {
   board.innerHTML = "";
   // A stored "7d" from an older version reads as "recent". No migration needed.
   const doneFilter = localStorage.getItem("doneFilter") === "all" ? "all" : "recent";
-  for (const status of COLUMNS) {
+  // No empty done column: the other three columns take its width.
+  for (const status of hideDone() ? COLUMNS.filter(s => s !== "done") : COLUMNS) {
     let colTickets = tickets.filter(t => t.status === status);
     const total = colTickets.length;
     if (status === "done") {
@@ -533,11 +563,95 @@ function switchView(view) {
   currentView = view;
   document.getElementById("tab-board").classList.toggle("active", view === "board");
   document.getElementById("tab-calendar").classList.toggle("active", view === "calendar");
+  document.getElementById("tab-table").classList.toggle("active", view === "table");
   document.getElementById("tab-archived").classList.toggle("active", view === "archived");
   // Board and Archived are both board-like: they share the #board container.
-  document.getElementById("board").style.display = view === "calendar" ? "none" : "flex";
+  document.getElementById("board").style.display = view === "calendar" || view === "table" ? "none" : "flex";
+  document.getElementById("table").style.display = view === "table" ? "block" : "none";
   document.getElementById("calendar").style.display = view === "calendar" ? "block" : "none";
   render();
+}
+
+const TABLE_COLUMNS = [
+  { key: "id", label: "ID" },
+  { key: "title", label: "Title" },
+  { key: "status", label: "Status" },
+  { key: "priority", label: "Priority" },
+  { key: "due", label: "Due" },
+  { key: "project", label: "Project" },
+  { key: "tags", label: "Tags" },
+  { key: "closed", label: "Closed" },
+];
+// The default is the board order: priority, then due, then id (see ticketSort).
+const DEFAULT_TABLE_SORT = { key: "priority", dir: "asc" };
+
+function loadTableSort() {
+  try {
+    const s = JSON.parse(localStorage.getItem("tableSort"));
+    if (s && TABLE_COLUMNS.some(c => c.key === s.key) && (s.dir === "asc" || s.dir === "desc")) return s;
+  } catch (e) {}
+  return DEFAULT_TABLE_SORT;
+}
+
+// A sort key per column. A blank value is null, and it goes last in both
+// directions, so a reverse sort does not put hundreds of empty dates on top.
+function tableSortValue(t, key) {
+  switch (key) {
+    case "priority": return PRIORITY_RANK[t.priority];
+    case "status": return [...COLUMNS, "archived"].indexOf(t.status);
+    case "tags": return (t.tags || []).join(",").toLowerCase() || null;
+    case "title": return t.title.toLowerCase();
+    default: return t[key] || null;
+  }
+}
+
+function sortTableRows(tickets, { key, dir }) {
+  const sign = dir === "desc" ? -1 : 1;
+  return [...tickets].sort((a, b) => {
+    const av = tableSortValue(a, key), bv = tableSortValue(b, key);
+    if (av === null || bv === null) {
+      if (av !== bv) return av === null ? 1 : -1;
+    } else if (av !== bv) {
+      return (av < bv ? -1 : 1) * sign;
+    }
+    return ticketSort(a, b);
+  });
+}
+
+function setTableSort(key) {
+  const cur = loadTableSort();
+  const next = { key, dir: cur.key === key && cur.dir === "asc" ? "desc" : "asc" };
+  localStorage.setItem("tableSort", JSON.stringify(next));
+  render();
+}
+
+function renderTable(tickets) {
+  const sort = loadTableSort();
+  const todayStr = localISODate(new Date());
+  // Archived tickets have their own tab.
+  const rows = sortTableRows(tickets.filter(t => t.status !== "archived"), sort);
+  const arrow = sort.dir === "asc" ? " \u25B2" : " \u25BC";
+  const head = TABLE_COLUMNS.map(c =>
+    `<th class="${c.key === sort.key ? "sorted" : ""}" onclick="setTableSort('${c.key}')">${c.label}${c.key === sort.key ? arrow : ""}</th>`).join("");
+  const table = document.getElementById("table");
+  table.innerHTML = `<table class="tbl"><thead><tr>${head}</tr></thead><tbody></tbody></table>`;
+  const body = table.querySelector("tbody");
+  if (!rows.length) body.innerHTML = `<tr><td class="empty" colspan="${TABLE_COLUMNS.length}">No tickets</td></tr>`;
+  for (const t of rows) {
+    const overdue = t.due && t.due < todayStr && t.status !== "done";
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="id">${t.id}</td>
+      <td class="title">${escapeHtml(t.title)}</td>
+      <td>${t.status}</td>
+      <td><span class="prio prio-${t.priority}">${t.priority}</span></td>
+      <td class="${overdue ? "overdue" : ""}">${t.due || ""}</td>
+      <td>${escapeHtml(t.project || "")}</td>
+      <td>${(t.tags || []).map(tag => `<span class="tag-chip">#${escapeHtml(tag)}</span>`).join("")}</td>
+      <td>${t.closed || ""}</td>`;
+    tr.addEventListener("click", () => openModal(t));
+    body.appendChild(tr);
+  }
 }
 
 function changeMonth(delta) {
@@ -594,6 +708,11 @@ function renderCalendar(tickets) {
 }
 
 document.getElementById("search").addEventListener("input", render);
+document.getElementById("hide-done").checked = hideDone();
+document.getElementById("hide-done").addEventListener("change", e => {
+  localStorage.setItem("hideDone", e.target.checked ? "1" : "0");
+  render();
+});
 document.getElementById("project-filter").addEventListener("change", () => {
   localStorage.setItem("filter.project", document.getElementById("project-filter").value);
   render();
